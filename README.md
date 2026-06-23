@@ -1,4 +1,4 @@
-# Receipt Enricher
+# Recibbi Labs Receipt Insights
 
 Turn a phone photo of a grocery receipt into a structured, enriched breakdown.
 
