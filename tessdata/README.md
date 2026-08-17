@@ -3,15 +3,18 @@
 Drop the English language data here so the offline OCR path works **without**
 downloading from the jsdelivr CDN (which a TLS-intercepting proxy may block).
 
-Place **either** of these in this directory:
+Place the **uncompressed** `eng.traineddata` in this directory. It must not be
+gzipped: `src/ocr/tesseract.js` passes `gzip: false`, so both the cache read and
+the langPath fallback look for the plain file. A `.gz` here is not picked up.
 
-- `eng.traineddata`     ← uncompressed (preferred — loaded straight from cache)
-- `eng.traineddata.gz`  ← compressed (also fine — read locally, then unpacked)
+The blob this project pins (and checksums in `scripts/SHA256SUMS.txt`) is the
+full `tessdata_best` English LSTM model, served uncompressed:
 
-Get the file from a network without TLS interception (e.g. Google Colab). The
-matching asset for this project (tesseract.js 5.x, LSTM-only) is:
+    curl -fL https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/eng.traineddata -o eng.traineddata
 
-    https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz
+`scripts/fetch-tessdata.sh` does exactly this and verifies the checksum. Note
+that jsdelivr's `@tesseract.js-data/eng` `4.0.0_best_int` asset is a *different*
+(int8-quantized, 5.2 MB) build and will fail that check.
 
 ## Orientation data (recommended) — `osd.traineddata`
 

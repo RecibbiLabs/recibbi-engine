@@ -149,7 +149,7 @@ Run this in a **Google Colab** cell, then download `eng.traineddata`:
 
 ```python
 import requests, gzip
-url = "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz"
+url = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/eng.traineddata"
 raw = requests.get(url, timeout=60).content
 data = gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw   # normalize to uncompressed
 open("eng.traineddata", "wb").write(data)
