@@ -92,6 +92,18 @@ a:hover{text-decoration:underline}
 const FOOT = `<div class="footer">self-hosted · node + redis + bullmq · powered by Tavily image lookup</div>
 </div></body></html>`;
 
+// The provenance link under a receipt: a photographed receipt links to its
+// photo, a retailer JSON receipt to the payload it was normalized from.
+function sourceLink(record) {
+  if (record.kind === 'json') {
+    const doc = record.document || {};
+    const label = esc(record.retailer || 'retailer payload');
+    if (doc.discarded) return `<span class="pill">${label} payload (not retained)</span>`;
+    return `<a href="/receipts/${esc(record.id)}/payload" target="_blank" rel="noopener">view original payload</a> · <span class="pill">${label}</span>`;
+  }
+  return `<a href="/receipts/${esc(record.id)}/image" target="_blank" rel="noopener">view original photo</a> · <span class="pill">${esc(record.image?.originalName || record.image?.file || '')}</span>`;
+}
+
 function itemRow(it) {
   const thumb = it.enrichment && it.enrichment.imageUrl
     ? `<img class="thumb" src="${esc(it.enrichment.imageUrl)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb empty',textContent:'no image'}))">`
@@ -164,7 +176,7 @@ function renderReceipt(record) {
     <div class="items">${itemsHtml}</div>
     ${totals}
   </div>
-  <p style="margin-top:14px"><a href="/api/receipts/${esc(record.id)}">view raw JSON</a> · <a href="/receipts/${esc(record.id)}/image" target="_blank" rel="noopener">view original photo</a> · <span class="pill">${esc(record.image?.originalName || record.image?.file)}</span></p>
+  <p style="margin-top:14px"><a href="/api/receipts/${esc(record.id)}">view raw JSON</a> · ${sourceLink(record)}</p>
   ` + FOOT;
 }
 
@@ -193,7 +205,7 @@ function renderProfileResult(record, result) {
     <div class="items">${itemsHtml}</div>
     ${totals}
   </div>
-  <p style="margin-top:14px"><a href="/api/receipts/${esc(record.id)}/profileResults/${esc(result.profileId)}">view result JSON</a> · <a href="/receipts/${esc(record.id)}/image" target="_blank" rel="noopener">view original photo</a></p>
+  <p style="margin-top:14px"><a href="/api/receipts/${esc(record.id)}/profileResults/${esc(result.profileId)}">view result JSON</a> · ${sourceLink(record)}</p>
   ` + FOOT;
 }
 
@@ -256,7 +268,7 @@ function renderProductResult(record, result) {
     <div class="meta">${esc(result.store?.date || '')} · id ${esc(record.id)} · via ${esc(record.source)}</div>
     <div class="items">${itemsHtml}</div>
   </div>
-  <p style="margin-top:14px"><a href="/api/receipts/${esc(record.id)}/products/${esc(result.receiptProfileId)}">view result JSON</a> · <a href="/receipts/${esc(record.id)}/image" target="_blank" rel="noopener">view original photo</a></p>
+  <p style="margin-top:14px"><a href="/api/receipts/${esc(record.id)}/products/${esc(result.receiptProfileId)}">view result JSON</a> · ${sourceLink(record)}</p>
   ` + FOOT;
 }
 

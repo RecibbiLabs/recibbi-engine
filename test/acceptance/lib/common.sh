@@ -24,6 +24,11 @@ RE_TEST_PERSISTENCE="${RE_TEST_PERSISTENCE:-sqlite}"       # sqlite (default) | 
 RE_TEST_SAMPLE="${RE_TEST_SAMPLE:-$REPO_DIR/codex-receipt-ocr-human-reviewed-ground-truth/samples/costco/costco-boca-raton-2026-05-26-original.jpg}"
 # Full corpus dir (all merchants) for the optional chunked PaddleOCR corpus step.
 RE_TEST_CORPUS_DIR="${RE_TEST_CORPUS_DIR:-$REPO_DIR/codex-receipt-ocr-human-reviewed-ground-truth/samples}"
+# Retailer JSON ground truth, one directory per retailer domain — e.g.
+# <dir>/samsclub.com/<orderId>.json. Used by rest/97_retailerIngest.sh, which
+# falls back to the committed scrubbed fixtures under test/fixtures/retailers/
+# when this sibling repo isn't present, so that step always runs.
+RE_TEST_RETAILER_CORPUS_DIR="${RE_TEST_RETAILER_CORPUS_DIR:-$REPO_DIR/codex-receipt-retailer-ground-truth}"
 RE_TEST_KEEP_VOLUMES="${RE_TEST_KEEP_VOLUMES:-0}"          # 1 = keep volumes on teardown
 RE_TEST_NO_TEARDOWN="${RE_TEST_NO_TEARDOWN:-0}"            # 1 = leave stack up after run-all
 RE_TEST_POLL_INTERVAL="${RE_TEST_POLL_INTERVAL:-3}"
@@ -145,6 +150,21 @@ render_receipt_text() {
   ' 2>/dev/null
 }
 
+# Poll a receipt until it leaves the queue. Echoes the terminal status ("done"
+# or "failed"); dies on timeout. Callers assert on the status rather than
+# assuming success, so a step reports a real FAIL instead of a fatal.
+wait_for_receipt() {   # id [timeout_seconds]
+  require_jq
+  local id="$1" budget="${2:-$RE_TEST_POLL_TIMEOUT}" waited=0 s=""
+  while :; do
+    s="$(curl -fsS "$RE_TEST_BASE/api/receipts/$id" | jq -r .status)"
+    case "$s" in done|failed) break ;; esac
+    [ "$waited" -ge "$budget" ] && die "timed out waiting for $id (last status: $s)"
+    sleep "$RE_TEST_POLL_INTERVAL"; waited=$((waited + RE_TEST_POLL_INTERVAL))
+  done
+  printf '%s' "$s"
+}
+
 # Ensure a processed receipt exists; echo its id. Caches the id so steps run
 # independently but reuse the same receipt when run in sequence.
 ensure_receipt() {
@@ -159,14 +179,7 @@ ensure_receipt() {
   local id
   id="$(curl -fsS -F "receipt=@$RE_TEST_SAMPLE" -F "source=acceptance" "$RE_TEST_BASE/api/receipts" | jq -r .id)"
   [ -n "$id" ] && [ "$id" != "null" ] || die "upload failed (no id returned)"
-  local waited=0 s=""
-  while :; do
-    s="$(curl -fsS "$RE_TEST_BASE/api/receipts/$id" | jq -r .status)"
-    [ "$s" = "done" ] && break
-    [ "$s" = "failed" ] && die "receipt $id failed to process"
-    [ "$waited" -ge "$RE_TEST_POLL_TIMEOUT" ] && die "timed out waiting for $id (last status: $s)"
-    sleep "$RE_TEST_POLL_INTERVAL"; waited=$((waited + RE_TEST_POLL_INTERVAL))
-  done
+  [ "$(wait_for_receipt "$id")" = "done" ] || die "receipt $id failed to process"
   printf '%s' "$id" > "$RE_STATE_ID_FILE"
   printf '%s' "$id"
 }

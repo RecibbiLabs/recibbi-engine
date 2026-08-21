@@ -1,0 +1,52 @@
+[
+  {
+    "file": "scan-and-go.json",
+    "from": "00769925960064747015.json",
+    "note": "SCAN_AND_GO: 4 lines, one sold by the pound (trap 3)"
+  },
+  {
+    "file": "savings.json",
+    "from": "008220651018835151852.json",
+    "note": "IN_STORE with a priceDetails.savings row (positive, subtracted)"
+  },
+  {
+    "file": "fuel.json",
+    "from": "05320328058895178882.json",
+    "note": "FUEL: one line, gallons in quantityString, 3-decimal unit price"
+  },
+  {
+    "file": "tire-addons.json",
+    "from": "10106821731.json",
+    "note": "ACC_TIRE: addOns[] line, Product fee, no paymentMethods"
+  },
+  {
+    "file": "delivery-glass.json",
+    "from": "10143302015.json",
+    "note": "DELIVERY on GLASS: no club, Shipping fee, catalogue usItemIds"
+  },
+  {
+    "file": "electronic-voided.json",
+    "from": "18269993991048725005.json",
+    "note": "ELECTRONIC: voided zero-quantity membership rows"
+  },
+  {
+    "file": "two-groups.json",
+    "from": "9885842023.json",
+    "note": "the one payload whose order splits across two fulfillment groups"
+  },
+  {
+    "file": "returned.json",
+    "from": "647034762218919246966.json",
+    "note": "a RETURNED category, line still at its original positive price"
+  },
+  {
+    "file": "items-check-fails.json",
+    "from": "976767076793172856129.json",
+    "note": "line sum $147.21 over a $141.97 subtotal — a voided line still on the tape"
+  },
+  {
+    "file": "total-check-fails.json",
+    "from": "019102914021720042734.json",
+    "note": "a $2.00 counter fee in no fees[] row — total check fails, items check passes"
+  }
+]
