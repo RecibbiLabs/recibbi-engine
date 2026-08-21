@@ -4,11 +4,13 @@ const express = require('express');
 const config = require('./config');
 const logger = require('./logger');
 const receipts = require('./routes/receipts');
+const retailerReceipts = require('./routes/retailerReceipts');
 const receiptProfiles = require('./routes/receiptProfiles');
 const products = require('./routes/products');
 const tenantsRoute = require('./routes/tenants');
 const tenants = require('./tenants');
 const profileStore = require('./receiptProfiles/profileStore');
+const retailers = require('./retailers/registry');
 const { cache } = require('./redis');
 
 /**
@@ -53,6 +55,7 @@ function createApp() {
       tenants: tenantCount,
       defaultTenant: config.defaultTenantId || null,
       receiptProfiles: receiptProfileCount,
+      retailers: retailers.list().map((r) => r.id),
       products: {
         enabled: config.products.enabled,
         resolver: config.products.resolver,
@@ -64,6 +67,7 @@ function createApp() {
 
   app.use(tenantsRoute);
   app.use(receipts);
+  app.use(retailerReceipts);
   app.use(receiptProfiles);
   app.use(products);
 

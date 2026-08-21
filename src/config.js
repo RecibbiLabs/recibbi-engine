@@ -96,6 +96,36 @@ const config = {
     defaultProfileId: process.env.DEFAULT_PROFILE_ID || '',
   },
 
+  // Retailer JSON ingest: structured receipt payloads posted straight from a
+  // retailer's own order API (see docs/RETAILER-INGEST.md). These skip OCR
+  // entirely — a per-retailer ADAPTER normalizes the payload into the same
+  // canonical { store, items, totals } the OCR path produces, so everything
+  // downstream (profiles, products, views, queue) is shared. Adapters are code
+  // modules shipped WITH the app (like transformers/resolvers), selected by the
+  // retailer id in the URL, never by request-supplied code.
+  retailers: {
+    adaptersDir: path.join(__dirname, 'retailers', 'adapters'),
+    // Enrichment (Tavily image/metadata lookup) default for JSON receipts.
+    // OFF by default: a retailer payload already carries clean product names
+    // and its own thumbnails, so the lookup mostly re-buys what we were given.
+    // Per-upload override: `enrich=1` / `enrich=0`.
+    enrichByDefault: bool(process.env.RETAILER_ENRICH_DEFAULT, false),
+    // The payload is always written to uploads/<id>.json — the worker normalizes
+    // it out-of-band, exactly as it OCRs a photo out-of-band. This flag decides
+    // whether it is KEPT after processing: on (the default) a receipt can be
+    // re-normalized when its adapter improves, without re-fetching from the
+    // retailer. Retailer payloads carry personal data (member name, address,
+    // phone, email, card last-4) that nothing downstream reads, so set 0 to
+    // delete the payload once the receipt is done.
+    storeRawPayload: bool(process.env.RETAILER_STORE_RAW_PAYLOAD, true),
+    maxPayloadBytes: int(process.env.RETAILER_MAX_PAYLOAD_MB, 4) * 1024 * 1024,
+    // Re-posting the same order id (a sync tool replaying its history) returns
+    // the receipt already created instead of a duplicate. The index lives in
+    // Redis, so an eviction degrades to today's behavior: a second record.
+    dedupe: bool(process.env.RETAILER_DEDUPE, true),
+    dedupeTtlSeconds: int(process.env.RETAILER_DEDUPE_TTL_SECONDS, 60 * 60 * 24 * 90),
+  },
+
   // Local directory for Tesseract language data (eng.traineddata[.gz]). Used as
   // both the cache and the offline lang-path so first run needs no CDN download
   // — handy on networks that block/inspect the jsdelivr CDN. Override with

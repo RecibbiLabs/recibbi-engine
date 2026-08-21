@@ -18,6 +18,7 @@
     "test:live:samples": "node --test test/live/samples.live.test.js",
     "test:live:tesseract": "node --test test/live/tesseract.live.test.js",
     "test:live:stack": "node --test test/live/stack.live.test.js",
+    "test:live:samsclub": "node --test test/live/samsclub-corpus.live.test.js",
     "start": "node src/server.js",
     "server": "node src/server.js",
     "worker": "node src/worker.js",

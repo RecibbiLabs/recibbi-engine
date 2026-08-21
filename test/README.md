@@ -32,6 +32,32 @@ extraction paths are tested against one source of truth.
 | `config.test.js`     | `config`              | the README "which keys → which mode" matrix (nothing / Tavily / Anthropic / OpenAI / both / overrides) |
 | `view.test.js`       | `web/view`            | HTML rendering of items/totals/enrichment images, list + empty states, **HTML-escaping against injection from receipt text**, subtotal reconciliation note (shortfall warning / overage / ✓ match) |
 
+### Retailer JSON ingest ([docs/RETAILER-INGEST.md](../docs/RETAILER-INGEST.md))
+
+Structured receipts posted straight from a retailer's order API
+(`POST /api/retailer:samsclub.com/receipts`) — they skip OCR and are normalized
+by a per-retailer adapter into the same canonical shape the photo path produces.
+
+| File | Layer | Highlights |
+|------|-------|-----------|
+| `retailers-registry.test.js` | `retailers/registry` | adapter discovery, **alias resolution** (`samsclub` / `SamsClub.COM` / `Sam's Club` → `samsclub.com`), one listing entry per adapter, unknown id → null |
+| `retailers-samsclub.test.js` | `retailers/adapters/samsclub.com` | the adapter against **10 real scrubbed payloads**, one test per documented trap: authoritative `categories[]` over the projection, **unit price from the payload not `price/qty`**, fuel gallons + 3-decimal rate, flattened add-ons, kept voided rows, returned lines, the **two money checks reported separately**, half-present payloads, a moved `groups_<version>` key |
+| `retailer-ingest-routes.test.js` | `app` + `routes` (HTTP) | drives the **real Express app over loopback**: JSON body *and* multipart `.json` upload, unknown retailer → 400 (naming what is registered), **wrong-retailer payload → 400 before anything queues**, non-JSON → 400, image → 400, unknown tenant/profile → 400, `enrich=1`, **the same three flow shapes a photo upload picks**, identity scoping, **dedupe → 200 + `duplicateOf`**, payload read-back, the shared view |
+| `retailer-pipeline.test.js` | `pipeline` (JSON branch) | full **normalize → persist → summarize → `done`** with a `fetch` that THROWS — which is itself the assertion that no OCR backend and no Tavily were reached; adapter warnings on the record, provenance, `enrich=1` opt-in, **payload round-trip + idempotent re-normalize**, `RETAILER_STORE_RAW_PAYLOAD=0` discard, legacy records still enrich |
+
+Fixtures are real payloads with personal data replaced; the generator verifies
+its own scrub. See [`fixtures/retailers/samsclub/README.md`](fixtures/retailers/samsclub/README.md).
+
+The **optional** `live/samsclub-corpus.live.test.js` runs the adapter over a whole
+248-payload sync corpus and re-derives the schema doc's counts (1,438 line items,
+247/248 items check, 246/248 total check, 245/248 reconciled). It needs no keys
+and no network — it self-skips when the corpus directory is absent:
+
+```bash
+npm run test:live:samsclub
+SAMSCLUB_CORPUS=/path/to/data/cn_xxxx/raw npm run test:live:samsclub
+```
+
 ### Receipt Profiles ([docs/RECEIPT-PROFILES.md](../docs/RECEIPT-PROFILES.md))
 
 | File | Layer | Highlights |

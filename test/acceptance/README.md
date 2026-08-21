@@ -24,7 +24,8 @@ test/acceptance/
    ├─ 81_tesseractProfile.sh    # tesseractGroceryUs cleanup profile (Tesseract mode only)
    ├─ 90_resolveProducts.sh     # resolve products from a profile result (sync/async/dryRun)
    ├─ 95_multitenancy.sh        # dynamic tenant onboarding, per-tenant queues, cross-tenant/user isolation
-   └─ 96_persistence.sh         # active backend (filesystem|sqlite) + record survives an api/worker restart
+   ├─ 96_persistence.sh         # active backend (filesystem|sqlite) + record survives an api/worker restart
+   └─ 97_retailerIngest.sh      # retailer JSON ingest (POST /api/retailer:<id>/receipts) — table-driven per retailer
 ```
 
 Steps auto-discover: `run-all.sh` runs every `cli/*.sh`, then `rest/*.sh`, then
@@ -34,6 +35,37 @@ a near no-op); `81` is the reverse — it exercises the `tesseractGroceryUs` cle
 profile and **runs only under `--ocr tesseract`** (skips for vision and the
 PaddleOCR engines, whose text shape differs). The `corpus/` step is the optional
 PaddleOCR chunked-corpus run — it **self-skips unless `--paddle`/`--paddle-vl`**.
+
+### Retailer JSON ingest (`97_retailerIngest.sh`)
+
+Covers the second way into the pipeline: a receipt posted as the retailer's own
+order JSON, which skips OCR entirely (see
+[docs/RETAILER-INGEST.md](../../docs/RETAILER-INGEST.md)). It asserts the things
+only a live stack can show — that a JSON receipt rides the **same
+`process-receipt` job on the same per-tenant queue** and reaches `done` through a
+real worker, that the worker reads the payload blob back off the shared volume
+(the API and worker are separate containers), and that **dedupe survives a round
+trip through real Redis**. It runs under plain `--ocr tesseract` and does no
+model work: `extraction.provider` is the adapter, not an OCR engine.
+
+Payloads come from the ground-truth corpus when it is present
+(`$RE_TEST_RETAILER_CORPUS_DIR/<retailer>/<orderId>.json`, default
+`../codex-receipt-retailer-ground-truth`), otherwise from the committed scrubbed
+fixtures under `test/fixtures/retailers/`. Money and structure are identical
+either way, so the step **always runs** rather than skipping on a fresh checkout.
+
+**Adding a retailer** is one row in `RETAILER_CASES` at the top of the step:
+
+```
+# retailerId | fixtureDir | fixtureFile | orderId | items | total | storeName
+samsclub.com|samsclub|scan-and-go.json|00769925960064747015|4|39.66|Sam's Club
+```
+
+plus a scrubbed fixture at `test/fixtures/retailers/<fixtureDir>/<fixtureFile>`.
+Nothing else in the step is retailer-specific. It cross-checks the table against
+`GET /api/retailers` — a covered retailer that is not registered **fails**, and a
+registered retailer with no case **warns**, so shipping an adapter nags for
+coverage without breaking the suite.
 
 ## Isolation from production (run it on a host that already runs the app)
 

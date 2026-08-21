@@ -86,6 +86,9 @@ queued  ──►  processing  ──►  done
 | `GET`  | `/api/tenants` | List provisioned tenants (+ the default) | JSON |
 | `POST` | `/api/tenants` | Provision a tenant account (idempotent) | `201`/`200` JSON |
 | `POST` | `/api/receipts` | Upload a receipt image (enqueues processing; `X-Tenant-Id`/`X-User-Id` set the owner; optional `profileId` applies a profile after OCR, then resolves products by default — `resolveProducts=0` opts out) | `202` JSON |
+| `GET`  | `/api/retailers` | List the retailer JSON adapters this build ships | JSON array |
+| `POST` | `/api/retailer:<id>/receipts` | Ingest a retailer's own receipt JSON (skips OCR; same options as `/api/receipts` plus `enrich`/`dedupe`) | `202` / `200` JSON |
+| `GET`  | `/receipts/:id/payload` | The original retailer payload for a JSON receipt | JSON |
 | `GET`  | `/api/receipts` | List the identity's recent receipts (`?limit=`, max 500) | JSON array |
 | `GET`  | `/api/receipts/:id` | Full record for one receipt | JSON |
 | `GET`  | `/receipts/:id/view` | Human-readable HTML view | HTML |
@@ -251,6 +254,67 @@ curl -fsS "$BASE/api/receipts?limit=20" \
 
 `/view` returns the styled HTML page (open it in a browser). `/image` streams
 the original photo with its stored content type.
+
+### `POST /api/retailer:<retailerId>/receipts`
+
+Ingest a receipt the retailer already has — the JSON its own order API returns —
+instead of a photo. These **skip OCR entirely**: a per-retailer adapter
+normalizes the payload into the same canonical shape the photo path produces, so
+profiles, products, the views and the queue are all shared. Full design:
+**[docs/RETAILER-INGEST.md](RETAILER-INGEST.md)**.
+
+The retailer id is in the path because it selects the *schema the body is read
+against*. `GET /api/retailers` lists the ids a deployment accepts (aliases work:
+`samsclub`, `Sam's Club`, `samsclub.com`).
+
+Two body encodings:
+
+```bash
+# the payload as the request body
+curl -X POST "$BASE/api/retailer:samsclub.com/receipts" \
+  -H 'content-type: application/json' \
+  --data-binary @00769925960064747015.json
+
+# or as a multipart .json file, like a photo upload
+curl -X POST "$BASE/api/retailer:samsclub.com/receipts?enrich=1" \
+  -F 'receipt=@00769925960064747015.json;type=application/json' \
+  -F 'source=sync'
+```
+
+Options (query params or form fields): `profileId`, `resolveProducts`, `source`,
+`tenantId`, `userId` — same as `/api/receipts` — plus:
+
+| option | default | meaning |
+|--------|---------|---------|
+| `enrich` | `0` (`RETAILER_ENRICH_DEFAULT`) | Tavily image/metadata lookup. Off because a retailer payload already carries product names and its own thumbnails |
+| `dedupe` | `1` (`RETAILER_DEDUPE`) | re-posting an order id already ingested returns the existing receipt instead of a duplicate |
+
+```jsonc
+// 202 Accepted
+{
+  "id": "main:main:9f2c…",
+  "status": "queued",
+  "retailer": "samsclub.com",
+  "orderId": "00769925960064747015",
+  "displayId": "0076 9925 9600 6474 7015",
+  "enrich": false,
+  "profileId": null,
+  "statusUrl": "http://localhost:8080/api/receipts/main:main:9f2c…",
+  "viewUrl": "http://localhost:8080/receipts/main:main:9f2c…/view"
+}
+```
+
+| status | when |
+|--------|------|
+| `202` | accepted and queued |
+| `200` | this order was already ingested — body carries `duplicateOf` |
+| `400` | unknown retailer, payload not recognized for that retailer, invalid JSON, unknown tenant/profile |
+| `413` | payload over `RETAILER_MAX_PAYLOAD_MB` |
+
+The record it creates is an ordinary receipt with three extra fields — `kind:
+"json"`, `retailer`, and `document` (the payload blob, the counterpart of
+`image`) — so `GET /api/receipts/:id`, the list, the views, profiles and products
+all work unchanged. The stored payload is served at `/receipts/:id/payload`.
 
 ---
 

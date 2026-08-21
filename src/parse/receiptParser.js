@@ -183,4 +183,7 @@ function finalize(store, items, totals) {
   };
 }
 
-module.exports = { normalizeStructured, parseText };
+// `finalize` is exported so retailer JSON adapters (src/retailers/adapters/*)
+// build their totals the same way the OCR path does — same itemCount, same
+// sumOfItems rounding, same subtotal reconciliation tolerance.
+module.exports = { normalizeStructured, parseText, finalize };
