@@ -98,6 +98,83 @@ test('list returns records newest-first and respects the limit', async () => {
   assert.equal(limited.length, 1);
 });
 
+test('list orders by the date ON the receipt, not the date it was read', async () => {
+  // The shape a retailer backfill produces: it walks the order history
+  // newest-first, so the NEWEST purchase is the one created first and carries
+  // the EARLIEST createdAt. Ordering by createdAt led with the oldest.
+  const newestPurchase = await store.createReceipt({ buffer: sampleBuffer(), mimeType: 'image/jpeg' });
+  const oldestPurchase = await store.createReceipt({ buffer: sampleBuffer(), mimeType: 'image/jpeg' });
+  await store.update(newestPurchase.id, { store: { name: "Sam's Club", date: '2026-08-30' } });
+  await store.update(oldestPurchase.id, { store: { name: "Sam's Club", date: '2020-03-01' } });
+
+  const ids = (await store.list({ limit: 250 })).map((r) => r.id);
+  assert.ok(
+    ids.indexOf(newestPurchase.id) < ids.indexOf(oldestPurchase.id),
+    'the more recent purchase leads, even though it was read first'
+  );
+});
+
+test('a receipt date that cannot be read falls back to when it was read', async () => {
+  const older = await store.createReceipt({ buffer: sampleBuffer(), mimeType: 'image/jpeg' });
+  await new Promise((r) => setTimeout(r, 5));
+  const newer = await store.createReceipt({ buffer: sampleBuffer(), mimeType: 'image/jpeg' });
+  await store.update(older.id, { store: { name: 'Corner shop', date: 'CHECK #4417' } });
+
+  const ids = (await store.list({ limit: 250 })).map((r) => r.id);
+  assert.ok(ids.indexOf(newer.id) < ids.indexOf(older.id), 'junk in store.date does not reorder the list');
+});
+
+test('receiptDay reads the shapes store.date actually takes', () => {
+  const day = (date) => store.receiptDay({ createdAt: '2025-01-02T10:00:00.000Z', store: { date } });
+
+  assert.equal(day('2026-09-11'), '2026-09-11', "a retailer adapter's ISO day");
+  assert.equal(day('9/11/2026'), '2026-09-11', "detectDate's US M/D/Y");
+  assert.equal(day('11-9-25'), '2025-11-09', '...with a two-digit year');
+  assert.equal(day('2026/9/1'), '2026-09-01', '...and unpadded Y/M/D');
+
+  // Untrustworthy dates defer to createdAt rather than sorting on nonsense.
+  assert.equal(day('2/31/2026'), '2025-01-02', 'no such day');
+  assert.equal(day('1/1/1985'), '2025-01-02', 'before the product existed');
+  assert.equal(day('not a date'), '2025-01-02', 'not a date at all');
+  assert.equal(store.receiptDay({ createdAt: '2025-01-02T10:00:00.000Z', store: null }), '2025-01-02');
+});
+
+test('a receipt cannot be from the future', () => {
+  // The future is the one direction a bad date really hurts: it does not just
+  // sort wrong, it sorts FIRST, and stays at the top of the member's list until
+  // the calendar catches up. Computed from today so this never becomes a test
+  // that starts failing on a particular New Year's Day.
+  const read = '2025-01-02T10:00:00.000Z';
+  const day = (date) => store.receiptDay({ createdAt: read, store: { date } });
+  const atOffset = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
+  assert.equal(day(atOffset(0)), atOffset(0), 'today is a day a receipt can carry');
+  assert.equal(day(atOffset(1)), atOffset(1), "so is tomorrow -- a purchase can already be 'tomorrow' in UTC");
+  assert.equal(day(atOffset(30)), '2025-01-02', 'next month is a misread, not a purchase');
+  assert.equal(day(atOffset(400)), '2025-01-02', 'and so is next year');
+});
+
+test('receipts bought on the same day fall back to the order they were read', async () => {
+  // Ties were rare while the key was a millisecond. They are the common case
+  // now that it is a day, so the tie-break is what actually decides the order
+  // of a member's shopping trip -- and a reload has to draw it the same way.
+  const sameDay = '2026-07-04';
+  const readFirst = await store.createReceipt({ buffer: sampleBuffer(), mimeType: 'image/jpeg' });
+  await new Promise((r) => setTimeout(r, 5));
+  const readSecond = await store.createReceipt({ buffer: sampleBuffer(), mimeType: 'image/jpeg' });
+  await store.update(readFirst.id, { store: { name: 'Costco', date: sameDay } });
+  await store.update(readSecond.id, { store: { name: 'Costco', date: sameDay } });
+
+  const order = async () =>
+    (await store.list({ limit: 250 }))
+      .map((r) => r.id)
+      .filter((id) => id === readFirst.id || id === readSecond.id);
+
+  const first = await order();
+  assert.deepEqual(first, [readSecond.id, readFirst.id], 'same day, so the one read later leads');
+  assert.deepEqual(await order(), first, 'and a reload draws the same list in the same order');
+});
+
 test('image extension follows the declared mime type', async () => {
   const png = await store.createReceipt({ buffer: Buffer.from('x'), mimeType: 'image/png' });
   assert.match(png.image.file, /\.png$/);

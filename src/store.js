@@ -177,9 +177,125 @@ async function update(id, patch) {
   return save(next);
 }
 
+// --- "newest first" --------------------------------------------------------
+//
+// A receipt's recency is the day it was BOUGHT, not the moment this service
+// happened to read it. Those coincide for a photo sent minutes after the till,
+// and come apart completely for a retailer sync: a backfill walks an order
+// history newest-first and posts it as fast as the ingest pool drains, so years
+// of purchases all land within a minute of each other. `createdAt` then orders
+// a synced ledger by nothing a member can see -- and because the walk starts at
+// the newest order, it puts their OLDEST purchase at the top.
+//
+// This belongs here rather than in a caller, because list() SLICES. A caller
+// that re-sorts the page it was handed has put the wrong page in the right
+// order.
+
+const ISO_DAY_RE = /^(\d{4})-(\d{2})-(\d{2})/;
+const NUMERIC_DATE_RE = /^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/;
+
+// Below this a parsed year is OCR noise, not a purchase.
+const EARLIEST_YEAR = 2000;
+
+function isRealDay(y, m, d) {
+  if (m < 1 || m > 12 || d < 1) return false;
+  if (y < EARLIEST_YEAR || y > new Date().getUTCFullYear() + 1) return false;
+  return d <= new Date(Date.UTC(y, m, 0)).getUTCDate(); // day 0 of the next month
+}
+
+function toDay(y, m, d) {
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
 /**
- * List a single identity's receipts, newest first. Scope defaults to the
- * configured identity (so single-tenant callers pass only `{ limit }`).
+ * The latest day a receipt could honestly claim: tomorrow, in UTC.
+ *
+ * The year bound in isRealDay is a coarse sieve -- it admits every day up to
+ * next New Year's Eve, and the future is the one direction a bad date really
+ * hurts. A day misread forward does not merely sort wrong, it sorts FIRST, and
+ * stays pinned to the top of the member's list until the calendar catches up:
+ * a single slipped digit outranks everything they actually bought. One day of
+ * slack covers a purchase that is already "tomorrow" in UTC terms across a
+ * timezone offset, which is as far ahead as a real receipt ever gets.
+ */
+function latestPlausibleDay() {
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/** A sortable day, or null when it is not one a receipt could carry. */
+function dayIfPlausible(y, m, d) {
+  if (!isRealDay(y, m, d)) return null;
+  const day = toDay(y, m, d);
+  return day <= latestPlausibleDay() ? day : null;
+}
+
+/**
+ * `store.date` as a sortable YYYY-MM-DD, or null when it cannot be trusted.
+ *
+ * The field is NOT reliably canonical. A retailer adapter writes an ISO day
+ * (src/retailers/adapters/samsclub.com.js slices one off the order date), but a
+ * photographed receipt's date comes from detectDate() in
+ * src/parse/receiptParser.js, which returns whatever substring matched --
+ * "9/11/2026" and "11-9-26" are both shapes it emits. Compared as strings those
+ * sort "9/..." after "12/...", which is worse than not sorting at all. So a
+ * date has to parse to a real day before it is allowed to order anything.
+ */
+function parseStoreDay(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+
+  const iso = s.match(ISO_DAY_RE);
+  if (iso) {
+    const [y, m, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+    return dayIfPlausible(y, m, d);
+  }
+
+  const parts = s.match(NUMERIC_DATE_RE);
+  if (!parts) return null;
+
+  // A four-digit leading field is Y/M/D; otherwise it is the M/D/Y that
+  // detectDate() reads off a US receipt. A two-digit year is this century --
+  // the alternative is a receipt from before the product existed.
+  let [y, m, d] =
+    parts[1].length === 4
+      ? [Number(parts[1]), Number(parts[2]), Number(parts[3])]
+      : [Number(parts[3]), Number(parts[1]), Number(parts[2])];
+  if (y < 100) y += 2000;
+  if (m > 12 && d <= 12) [m, d] = [d, m]; // written D/M/Y by a member abroad
+
+  return dayIfPlausible(y, m, d);
+}
+
+/** The day a receipt is FROM, falling back to the day it was read. */
+function receiptDay(record) {
+  const read = record && typeof record.createdAt === 'string' ? record.createdAt.slice(0, 10) : '';
+  return parseStoreDay(record && record.store && record.store.date) || read;
+}
+
+/**
+ * Newest first, and TOTAL: it returns 0 only for a record against itself.
+ *
+ * The comparator this replaced was `a.createdAt < b.createdAt ? 1 : -1`, which
+ * reports every tie as "a first" -- not a consistent ordering, and harmless
+ * only while ties are rare. Ties stop being rare the moment the key is a day
+ * rather than a millisecond, so same-day receipts fall back to when they were
+ * read and then to their id. A reload draws the same list in the same order.
+ */
+function byRecency(a, b) {
+  const dayA = receiptDay(a);
+  const dayB = receiptDay(b);
+  if (dayA !== dayB) return dayA < dayB ? 1 : -1;
+  const readA = a.createdAt || '';
+  const readB = b.createdAt || '';
+  if (readA !== readB) return readA < readB ? 1 : -1;
+  if (a.id === b.id) return 0;
+  return a.id < b.id ? 1 : -1;
+}
+
+/**
+ * List a single identity's receipts, newest first -- by the date ON the
+ * receipt, not the date it was read; see byRecency() above. Scope defaults to
+ * the configured identity (so single-tenant callers pass only `{ limit }`).
  */
 async function list({ tenantId, userId, limit = 50 } = {}) {
   const def = identity.defaultScope();
@@ -190,7 +306,7 @@ async function list({ tenantId, userId, limit = 50 } = {}) {
   } catch {
     return []; // invalid scope -> nothing to list
   }
-  records.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  records.sort(byRecency);
   return records.slice(0, limit);
 }
 
@@ -249,6 +365,7 @@ module.exports = {
   get,
   update,
   list,
+  receiptDay,
   imagePathFor,
   documentPathFor,
   blobPathFor,
