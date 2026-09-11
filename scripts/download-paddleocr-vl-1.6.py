@@ -26,7 +26,7 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec
 import sys
 from pathlib import Path
 
@@ -54,7 +54,7 @@ AUX_MODELS = [
 
 def run(cmd: list[str]) -> None:
     print("+", " ".join(cmd), flush=True)
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, shell=False)
 
 
 def ensure_package(import_name: str, pip_name: str) -> None:
