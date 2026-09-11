@@ -208,6 +208,28 @@ function toDay(y, m, d) {
 }
 
 /**
+ * The latest day a receipt could honestly claim: tomorrow, in UTC.
+ *
+ * The year bound in isRealDay is a coarse sieve -- it admits every day up to
+ * next New Year's Eve, and the future is the one direction a bad date really
+ * hurts. A day misread forward does not merely sort wrong, it sorts FIRST, and
+ * stays pinned to the top of the member's list until the calendar catches up:
+ * a single slipped digit outranks everything they actually bought. One day of
+ * slack covers a purchase that is already "tomorrow" in UTC terms across a
+ * timezone offset, which is as far ahead as a real receipt ever gets.
+ */
+function latestPlausibleDay() {
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/** A sortable day, or null when it is not one a receipt could carry. */
+function dayIfPlausible(y, m, d) {
+  if (!isRealDay(y, m, d)) return null;
+  const day = toDay(y, m, d);
+  return day <= latestPlausibleDay() ? day : null;
+}
+
+/**
  * `store.date` as a sortable YYYY-MM-DD, or null when it cannot be trusted.
  *
  * The field is NOT reliably canonical. A retailer adapter writes an ISO day
@@ -225,7 +247,7 @@ function parseStoreDay(raw) {
   const iso = s.match(ISO_DAY_RE);
   if (iso) {
     const [y, m, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
-    return isRealDay(y, m, d) ? toDay(y, m, d) : null;
+    return dayIfPlausible(y, m, d);
   }
 
   const parts = s.match(NUMERIC_DATE_RE);
@@ -241,7 +263,7 @@ function parseStoreDay(raw) {
   if (y < 100) y += 2000;
   if (m > 12 && d <= 12) [m, d] = [d, m]; // written D/M/Y by a member abroad
 
-  return isRealDay(y, m, d) ? toDay(y, m, d) : null;
+  return dayIfPlausible(y, m, d);
 }
 
 /** The day a receipt is FROM, falling back to the day it was read. */
