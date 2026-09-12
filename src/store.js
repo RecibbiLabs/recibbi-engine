@@ -310,6 +310,61 @@ async function list({ tenantId, userId, limit = 50 } = {}) {
   return records.slice(0, limit);
 }
 
+/**
+ * A PAGE of one identity's receipts, and the counts that say what it is a page
+ * OF.
+ *
+ * `list()` above answers "the newest N". This answers "receipts 24 through 47
+ * of the 317 that match, out of 1,284" -- which is the question a member with
+ * four years of receipts is actually asking, and the one an array cannot
+ * answer. A caller handed only rows has no way to tell 24 receipts from 24 of
+ * 1,284, so it says the wrong one.
+ *
+ * THE PREDICATE COMES IN AS A FUNCTION rather than as filter fields, and that
+ * is deliberate: what counts as a match is the UX contract (see
+ * src/receiptQuery.js, and the design atlas behind it), and this module's job
+ * is scope, order and slice. It also keeps the two modules from requiring each
+ * other, since the predicate needs receiptDay() from here.
+ *
+ * THE SORT STILL HAPPENS HERE, BEFORE THE SLICE, for the reason the comment
+ * above byRecency() gives: a caller that re-orders the page it was handed has
+ * put the wrong page in the right order. Slicing a list this function has
+ * already ordered is safe; re-sorting it is not.
+ *
+ * `all` is every record in scope, ordered, and it is returned because the facet
+ * counts are questions about the BOOKS rather than about the page -- how many
+ * receipts each store would leave, which stores there are at all. It is also
+ * the honest shape of what this costs today: both backends store receipts as
+ * opaque JSON documents, so there is nothing to filter or count on but the
+ * records themselves, and every call reads them all.
+ *
+ * TODO(index): when a backend can answer WHERE and COUNT -- the sqlite one
+ * needs columns for day, store, source, status and total beside the json -- the
+ * filter, the counts and the facets all push down and `all` goes away. Nothing
+ * outside this function has to change for that to happen, which is why it is
+ * shaped this way now.
+ */
+async function query({ tenantId, userId, filter, limit = 50, offset = 0 } = {}) {
+  const def = identity.defaultScope();
+  const scope = { tenantId: tenantId || def.tenantId, userId: userId || def.userId };
+  let records;
+  try {
+    records = await persistence.list({ kind: 'receipts', tenant: scope.tenantId, user: scope.userId });
+  } catch {
+    return { records: [], all: [], total: 0, matched: 0 }; // invalid scope -> nothing to list
+  }
+  records.sort(byRecency);
+
+  const matching = typeof filter === 'function' ? records.filter(filter) : records;
+  const from = Math.max(0, offset);
+  return {
+    records: matching.slice(from, from + limit),
+    all: records,
+    total: records.length,
+    matched: matching.length,
+  };
+}
+
 /** Absolute path of a receipt's blob, whichever kind it is. */
 function blobPathFor(record) {
   const { tenantId, userId } = identity.resolveId(record.id);
@@ -365,6 +420,7 @@ module.exports = {
   get,
   update,
   list,
+  query,
   receiptDay,
   imagePathFor,
   documentPathFor,
