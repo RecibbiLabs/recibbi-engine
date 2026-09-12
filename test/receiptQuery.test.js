@@ -110,6 +110,25 @@ test('an unreadable filter is no filter, not a rejection', () => {
   assert.deepEqual(f.store, ['Aldi'], 'an empty value is not a choice');
 });
 
+test('a date bound that is not a day is not a bound', () => {
+  // The same rule as amt_min above, for the two parameters that were missing
+  // it. `from=banana` used to be compared lexically against '2026-08-24' and
+  // every other day, so every receipt sorted below it and the member got an
+  // empty list with nothing to explain it. Of the two ways to misread a filter,
+  // silently hiding the whole of somebody's books is the worse one.
+  assert.equal(q.dayOrNull('2026-09-11'), '2026-09-11');
+  assert.equal(q.dayOrNull('banana'), null, 'not a date at all');
+  assert.equal(q.dayOrNull('2026-09'), null, 'half a day is not a day');
+  assert.equal(q.dayOrNull('9/11/2026'), null, 'the wire spelling is ISO, and only ISO');
+  assert.equal(q.dayOrNull(''), null);
+
+  const junk = q.parse({ from: 'banana', to: '' });
+  assert.equal(junk.from, null);
+  assert.equal(junk.to, null);
+  assert.equal(q.isEmpty(junk), true, 'so nothing is narrowing the list');
+  assert.equal(q.matches(done(), junk), true, 'and the books come back whole');
+});
+
 test('the date range means the same day the sort used', () => {
   // store.date is not reliably canonical: a retailer adapter writes an ISO day,
   // a photographed receipt carries whatever detectDate() matched. The ordering

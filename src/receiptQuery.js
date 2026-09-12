@@ -21,6 +21,15 @@
 // and this module running it over the books must agree, or a member watches the
 // list change under them when a filter round-trips. Keep them in step.
 //
+// ONE PART OF THAT IS NOT PORTED FROM THERE, AND RUNS THE OTHER WAY: how a day
+// is READ. `store.date` is not canonical, so the atlas's receiptDay() matches
+// parseStoreDay() in src/store.js rather than the reverse -- this is the side
+// that orders, slices and filters the books, and a browser cannot usefully hold
+// an opinion about the sort key of a page it did not sort. The table of shapes
+// in test/store.test.js is asserted verbatim in the atlas's test/laws.test.js
+// (which ports into recibbi-ux-main), so a shape added to one and not the other
+// fails on both. Add one here and add it there.
+//
 // TWO TRAPS, both recorded there after they were real:
 //
 //   A RANGE MUST NOT BE APPLIED WHEN NEITHER END IS SET. `amt_min=0` with no
@@ -46,6 +55,26 @@ function numOrNull(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
   return Number.isNaN(n) ? null : n;
+}
+
+/** The shape a day bound has to have. Anything else is not a day. */
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * An inclusive end of the date range, or null -- a day that cannot be read is
+ * not a bound.
+ *
+ * This is numOrNull's rule for the other two parameters, and it was missing.
+ * `amt_min=banana` was correctly dropped while `from=banana` was passed
+ * through and compared lexically, so EVERY receipt sorted below it and the
+ * member got an empty list with nothing to explain it. An unreadable filter is
+ * no filter -- and of the two ways to get that wrong, silently hiding the whole
+ * of somebody's books is the worse one.
+ */
+function dayOrNull(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const s = String(v).trim();
+  return DAY_RE.test(s) ? s : null;
 }
 
 function empty() {
@@ -77,8 +106,8 @@ function parse(query = {}) {
       .map((v) => String(v))
       .filter(Boolean);
   }
-  f.from = query.from ? String(query.from) : null;
-  f.to = query.to ? String(query.to) : null;
+  f.from = dayOrNull(query.from);
+  f.to = dayOrNull(query.to);
   f.items = { min: numOrNull(query.items_min), max: numOrNull(query.items_max) };
   f.amount = { min: numOrNull(query.amt_min), max: numOrNull(query.amt_max) };
   return f;
@@ -255,4 +284,5 @@ module.exports = {
   receiptTotal,
   receiptDay,
   numOrNull,
+  dayOrNull,
 };

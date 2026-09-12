@@ -327,6 +327,19 @@ test('an amount range leaves out the receipts that have no amount yet', async ()
   assert.ok(body.matched < body.total);
 });
 
+test('an unreadable date bound does not empty the books', async () => {
+  // `amt_min=banana` was already dropped; `from=banana` was not, and it hid
+  // every receipt the member owns behind a lexical compare. Both are no filter.
+  const junk = await (await fetch(`${base}/api/receipts?envelope=1&from=banana&limit=500`)).json();
+  const none = await (await fetch(`${base}/api/receipts?envelope=1&limit=500`)).json();
+  assert.equal(junk.matched, none.total, 'an unreadable bound narrows nothing');
+  assert.ok(junk.matched > 0, 'and the list is not silently empty');
+
+  // A bound that IS a day still narrows, so this is not just a disabled filter.
+  const real = await (await fetch(`${base}/api/receipts?envelope=1&from=2026-08-20&limit=500`)).json();
+  assert.ok(real.matched < real.total, 'a real bound still does its job');
+});
+
 test('the facets describe the books, not the page that came back', async () => {
   const body = await (await fetch(`${base}/api/receipts?envelope=1&limit=1&store=Aldi`)).json();
   assert.equal(body.records.length, 1, 'one row came back');

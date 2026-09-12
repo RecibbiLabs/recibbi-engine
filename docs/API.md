@@ -265,9 +265,9 @@ checkboxes submits; a bare pair per range.
 | parameter | what it narrows to |
 |---|---|
 | `store=` (repeatable) | `store.name`, exactly |
-| `source=` (repeatable) | how it arrived — `telegram`, `sync`, `api`, `cli`, `seed` |
+| `source=` (repeatable) | how it arrived. Whatever the uploader sent, defaulting to `api` — in practice `telegram`, `sync`, `api`, `cli`, `seed`, but it is a free-form string rather than an enum, which is why `facets.options.source` is derived from the books instead of hardcoded |
 | `status=` (repeatable) | `queued` · `processing` · `done` · `failed` |
-| `from=` / `to=` | `YYYY-MM-DD`, inclusive, against the **same day the sort uses** |
+| `from=` / `to=` | `YYYY-MM-DD` (and only that shape), inclusive, against the **same day the sort uses** |
 | `amt_min=` / `amt_max=` | the printed total, or the items summed when none was printed |
 | `items_min=` / `items_max=` | how many line items |
 | `offset=` | how many matching receipts to skip |
@@ -284,9 +284,13 @@ Two rules a caller must not re-implement differently, both of them recorded in
    "everything" — a range tests a number, and a receipt still being read has
    none, so applying one drops every in-flight receipt. Send neither end rather
    than both ends at their bounds.
-2. **An unreadable filter is ignored, not rejected.** `amt_min=banana` is no
-   filter and a `200`. 400-ing a member out of their own receipts over a
-   malformed parameter would be the wrong trade.
+2. **An unreadable filter is ignored, not rejected.** `amt_min=banana` and
+   `from=banana` are both no filter and a `200`. 400-ing a member out of their
+   own receipts over a malformed parameter would be the wrong trade — and so
+   would the other failure, which is what a date bound used to do: passed
+   through unparsed it was compared lexically, every receipt sorted below it,
+   and the member got an empty list with nothing to explain it. A bound that is
+   not a `YYYY-MM-DD` day is dropped.
 
 #### `?envelope=1` — the page, and what it is a page **of**
 
