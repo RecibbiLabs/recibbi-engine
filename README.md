@@ -227,7 +227,10 @@ curl -F "receipt=@receipt.jpg" -F "profileId=usGrocery1" http://localhost:8080/a
 # -> 202 { "id": "...", "profileId": "rp_...", "profileResultUrl": "...", ... }
 
 curl http://localhost:8080/api/receipts/<id>     # one record (JSON)
-curl http://localhost:8080/api/receipts          # list
+curl http://localhost:8080/api/receipts          # list (newest first)
+# A page of the books, narrowed, with the counts and facets a filter panel needs:
+curl "http://localhost:8080/api/receipts?envelope=1&store=Aldi&amt_min=50&limit=24&offset=0"
+# -> { records, total, matched, limit, offset, more, facets }   see docs/API.md
 # Web view:           http://localhost:8080/receipts/<id>/view
 # Profile-applied view: http://localhost:8080/receipts/<id>/profileResults/usGrocery1/view
 # Original photo:     http://localhost:8080/receipts/<id>/image

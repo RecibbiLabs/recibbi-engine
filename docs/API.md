@@ -89,7 +89,7 @@ queued  ──►  processing  ──►  done
 | `GET`  | `/api/retailers` | List the retailer JSON adapters this build ships | JSON array |
 | `POST` | `/api/retailer:<id>/receipts` | Ingest a retailer's own receipt JSON (skips OCR; same options as `/api/receipts` plus `enrich`/`dedupe`) | `202` / `200` JSON |
 | `GET`  | `/receipts/:id/payload` | The original retailer payload for a JSON receipt | JSON |
-| `GET`  | `/api/receipts` | List the identity's recent receipts (`?limit=`, max 500) | JSON array |
+| `GET`  | `/api/receipts` | List the identity's receipts, newest first. Filters, `?offset=`, `?limit=` (max 500). `?envelope=1` adds the counts and the facets | JSON array (object with `envelope=1`) |
 | `GET`  | `/api/receipts/:id` | Full record for one receipt | JSON |
 | `GET`  | `/receipts/:id/view` | Human-readable HTML view | HTML |
 | `GET`  | `/receipts/:id/image` | The original uploaded photo | image bytes |
@@ -243,12 +243,112 @@ curl -fsS "$BASE/api/receipts/1b70d95bbd9f462f" | jq .
 Returns `404` if the id is unknown. When `enrichment` ran, each item also carries
 `{ imageUrl, title, snippet, url, ... }`.
 
-### `GET /api/receipts?limit=N`
+### `GET /api/receipts` — a page of the books
+
+Newest first, by the day **on** the receipt rather than the day it was read (see
+`byRecency` in `src/store.js`). `?limit=` caps at 500 and defaults to 50.
 
 ```bash
 curl -fsS "$BASE/api/receipts?limit=20" \
   | jq '.[] | {id, status, store: .store.name, itemCount, createdAt}'
 ```
+
+`itemCount` is **`null`**, not `0`, for a receipt nobody has read yet. Zero is a
+claim about a basket — *there was nothing in it* — and nothing has opened this
+one; a caller handed `0` cannot tell the two apart.
+
+#### Narrowing it
+
+Repeated keys for the multiple-choice groups, because that is what a GET form of
+checkboxes submits; a bare pair per range.
+
+| parameter | what it narrows to |
+|---|---|
+| `store=` (repeatable) | `store.name`, exactly |
+| `source=` (repeatable) | how it arrived — `telegram`, `sync`, `api`, `cli`, `seed` |
+| `status=` (repeatable) | `queued` · `processing` · `done` · `failed` |
+| `from=` / `to=` | `YYYY-MM-DD`, inclusive, against the **same day the sort uses** |
+| `amt_min=` / `amt_max=` | the printed total, or the items summed when none was printed |
+| `items_min=` / `items_max=` | how many line items |
+| `offset=` | how many matching receipts to skip |
+
+```bash
+# Everything from Aldi over $50, second page of 24
+curl -fsS "$BASE/api/receipts?store=Aldi&amt_min=50&limit=24&offset=24" | jq length
+```
+
+Two rules a caller must not re-implement differently, both of them recorded in
+`../recibbi-ux-design-atlas/docs/porting.md` after they were real bugs:
+
+1. **A range that is not set is not a range.** `amt_min=0` with no max is *not*
+   "everything" — a range tests a number, and a receipt still being read has
+   none, so applying one drops every in-flight receipt. Send neither end rather
+   than both ends at their bounds.
+2. **An unreadable filter is ignored, not rejected.** `amt_min=banana` is no
+   filter and a `200`. 400-ing a member out of their own receipts over a
+   malformed parameter would be the wrong trade.
+
+#### `?envelope=1` — the page, and what it is a page **of**
+
+```bash
+curl -fsS "$BASE/api/receipts?envelope=1&limit=24&store=Aldi" | jq '{total, matched, more}'
+```
+```json
+{
+  "records": [ /* card rows — see below */ ],
+  "total": 1284,
+  "matched": 127,
+  "limit": 24,
+  "offset": 0,
+  "more": true,
+  "facets": {
+    "counts":  { "store": { "Aldi": 127, "Costco Wholesale": 287 },
+                 "source": { "telegram": 744, "sync": 540 },
+                 "status": { "done": 1273, "failed": 9 } },
+    "options": { "store": ["Aldi", "Costco Wholesale"],
+                 "source": ["sync", "telegram"],
+                 "status": ["done", "processing", "queued", "failed"] },
+    "bounds":  { "amount": { "lo": 0, "hi": 290 }, "items": { "lo": 0, "hi": 17 } },
+    "days":    { "from": "2021-06-17", "to": "2026-09-11" },
+    "pending": 11
+  }
+}
+```
+
+**`total` and `matched` are the point of it, and neither is `records.length`.**
+`total` is the books, `matched` is what the filters leave, and the length of the
+array is how far the caller has paged. A list heading that counts the rows it
+was handed tells a member with 1,284 receipts that 1,260 of them have gone
+missing, and then changes its mind as they scroll.
+
+**The facets describe the books, not the page.** Every count is taken with the
+*other* groups applied and its own ignored — count `store` with the store filter
+applied to itself and every unticked box reads `0`, which says nothing about
+what ticking it would do. `options` is a `DISTINCT` per group, so a member who
+has never used Telegram is never offered a Telegram box. `pending` counts the
+receipts carrying no numbers yet, which is how a caller explains a range that
+returned nothing.
+
+**The row is fatter under `envelope=1`.** The bare array keeps its summary shape
+(`id`, `status`, `store`, `itemCount`, `createdAt`, links); the envelope's rows
+add what a list card actually draws — `source`, `kind`, `items` with their
+enrichment, `totals`, `reconciled`, `retailer`, `orderId`, `summary`, `error`,
+`extraction.provider`, and `image` as a **boolean** (whether there *is* a photo,
+which decides whether a card offers one; the filename is internal). It leaves
+out `extraction.rawText`, the blob descriptor and `timings` — a page of 24
+should not carry a megabyte of OCR text nobody will render.
+
+> **Why the envelope is opt-in.** The bare array is what the CLI and
+> `recibbi-ux-main` are pointed at, and it is unchanged. Without `envelope=1`
+> the filters and `offset` still apply — a narrowed array is still an array —
+> but the counts and facets have nowhere to go.
+
+> **What this costs today.** Both persistence backends store receipts as opaque
+> JSON documents, so there is nothing to filter, order or count on but the
+> records themselves: every call reads all of the identity's receipts, sorts,
+> filters and counts in memory. That is honest at a few thousand and is the
+> reason `limit` is capped. The fix when it is needed is indexed columns beside
+> the JSON — see `TODO(index)` on `store.query()`.
 
 ### `GET /receipts/:id/view` and `/receipts/:id/image`
 
