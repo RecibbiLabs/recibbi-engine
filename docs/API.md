@@ -94,6 +94,11 @@ queued  ──►  processing  ──►  done
 | `GET`  | `/receipts/:id/view` | Human-readable HTML view | HTML |
 | `GET`  | `/receipts/:id/image` | The original uploaded photo | image bytes |
 | `GET`  | `/` | HTML list of all receipts | HTML |
+| `POST` | `/api/receipts/:id/share` | Mint the unlisted link for a receipt (idempotent) | `201` JSON |
+| `GET`  | `/api/receipts/:id/share` | The live link a receipt already has (never mints) | JSON / `404` |
+| `DELETE` | `/api/shares/:token` | Revoke a link | JSON |
+| `GET`  | `/api/shares/:token` | Resolve a token to its receipt — **no identity is read** | JSON / `404` |
+| `GET`  | `/r/:token` | The shared-receipt page — **no identity is read** | HTML / `404` |
 | `GET`  | `/api/transformers` | List available transformers | JSON array |
 | `GET`  | `/api/receiptProfiles` | List receipt profiles | JSON array |
 | `POST` | `/api/receiptProfiles` | Create a profile | `201` JSON |
@@ -358,6 +363,65 @@ should not carry a megabyte of OCR text nobody will render.
 
 `/view` returns the styled HTML page (open it in a browser). `/image` streams
 the original photo with its stored content type.
+
+### Unlisted share links — `/r/:token`
+
+An unlisted link to **one** receipt: a URL a member can send to somebody with no
+account at all, that renders that receipt and nothing else.
+
+```bash
+# Mint. Idempotent -- asking twice returns the SAME token, because a member who
+# opened the dialog twice would otherwise be handing out two links.
+curl -sX POST "$BASE/api/receipts/$ID/share"
+# 201 { "token": "u7Kd...Zc7V_Q", "receiptId": "acme:alice:1b70...",
+#       "url": "http://localhost:8080/r/u7Kd...Zc7V_Q",
+#       "createdAt": "...", "expiresAt": "..." }
+
+# Ask whether a link exists, without creating one by asking.
+curl -s "$BASE/api/receipts/$ID/share"          # 404 if it has never been shared
+
+# Open it -- as anybody, with no headers at all.
+curl -s "$BASE/r/$TOKEN"                        # the page
+curl -s "$BASE/api/shares/$TOKEN"               # the same receipt, as JSON
+
+# Revoke. This is the whole reason a share is a table row and not a signature.
+curl -sX DELETE "$BASE/api/shares/$TOKEN"       # { "revoked": true }
+```
+
+**The token is not the receipt id, and that is the load-bearing part.** A
+receipt id is `<tenant>:<user>:<hash>` — it carries the member's own scope in
+it, so a URL built from one publishes who they are to everybody they send the
+receipt to. The token is 16 random bytes, says nothing about the member, and can
+be destroyed without touching the receipt.
+
+**The lookup is keyed by the token and by nothing else.** `GET /r/:token` reads
+the share row for a `receiptId` and then loads that receipt **by id, from
+wherever it lives** — any tenant, any user. It must never resolve a token
+*within* some set of receipts it arrived at another way, because the reader's
+own books are not the set the receipt is in. A share table that covers half the
+receipts is worse than none: the failure is invisible on the side that does the
+sharing, and only the recipient ever finds out. (This is
+`recibbi-ux-design-atlas` fad83dd, ported; the assertion is
+`test/shares.test.js`'s *resolves a receipt that is not the default identity's*.)
+
+Four more things the route gets right:
+
+| | |
+|---|---|
+| **A dead token is not an error** | Revoked, expired and mistyped render the same page, say the same sentence and answer `404`. Distinguishing them would confirm receipts to somebody guessing tokens |
+| **The response does not vary by viewer** | No id, no tenant, no user, no id-bearing links, and identity headers are not read even when they are sent. Anything that changed with who is looking would leak whether the reader is the owner |
+| **`noindex` is not enough on its own** | Unlisted means the URL *is* the credential, so the page also sends `Referrer-Policy: no-referrer` — a reader who clicks through must not hand the token to the next server in the chain. Plus `X-Robots-Tag` and `Cache-Control: no-store` |
+| **A share is a grant, not a field** | Nothing was added to the receipt record. If the token lived on the record, revoking would be an edit to the receipt and every read of one would carry a live capability in it |
+
+Links expire after `SHARE_TTL_DAYS` days (default `30`; `0` disables expiry). A
+lapsed link resolves to nothing, and re-sharing that receipt mints a fresh
+token.
+
+> **Provenance is written for the reader, not for us.** The page says *synced
+> from the retailer* rather than naming the browser add-on, which is a thing the
+> recipient has not installed and has no reason to have heard of. The member's
+> own screens, which have a column of other sources to read a label against,
+> word it differently — see `sourceLabel()` in `recibbi-ux-main`.
 
 ### `POST /api/retailer:<retailerId>/receipts`
 

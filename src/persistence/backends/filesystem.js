@@ -10,9 +10,18 @@
 //   profileResults   <data>/<tenant>/<user>/profileResults/<id>/<sub>.json
 //   products         <data>/<tenant>/<user>/products/<id>/<sub>.json
 //   tenants          <data>/.registry/tenants/<id>.json               (global)
+//   shares           <data>/.registry/shares/<token>.json             (global)
+//   shareIndex       <data>/<tenant>/<user>/shareIndex/<id>.json
 //
 // `.registry` is not a valid id segment (src/identity.js SEGMENT_RE excludes
 // `.`), so the global registry dir can never collide with a real tenant dir.
+//
+// `shares` is GLOBAL for the same reason the tenant registry is, but the reason
+// is load-bearing here rather than incidental: a share row is addressed by its
+// token and by NOTHING else. Filing it under the minting member's tenant would
+// mean a reader has to know whose receipt it is before they can find out whose
+// receipt it is. `shareIndex` is the reverse lookup (receipt -> its token) and
+// IS scoped, because minting already has the receipt, and its scope, in hand.
 
 const fsp = require('fs/promises');
 const path = require('path');
@@ -26,6 +35,7 @@ const REGISTRY_DIR = '.registry';
 function baseDirFor(key) {
   const { kind, tenant, user } = key;
   if (kind === 'tenants') return path.join(config.dataDir, REGISTRY_DIR, 'tenants');
+  if (kind === 'shares') return path.join(config.dataDir, REGISTRY_DIR, 'shares');
   if (user) return identity.userDataDir({ tenantId: tenant, userId: user }, kind);
   return identity.tenantDataDir(tenant, kind);
 }
