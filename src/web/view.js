@@ -14,15 +14,21 @@ function money(n) {
   return n === null || n === undefined ? '—' : `$${Number(n).toFixed(2)}`;
 }
 
-const HEAD = `<!doctype html>
+// The document head, up to the stylesheet. Split out so the shared-receipt page
+// (which needs a different <title> and its own robots/referrer meta) is the
+// SAME page as every other view rather than a lookalike that can drift: one
+// stylesheet, one set of item rows, one totals block.
+const DOC_OPEN = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Receipt Enricher</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
+`;
+
+const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<style>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">`;
+
+const STYLE = `<style>
 :root{
   --paper:#f3ede0; --paper-2:#ece4d3; --ink:#211d17; --muted:#7a7060;
   --accent:#bd4b2c; --line:#cdbfa6; --card:#fbf7ee; --ok:#3f7d4f; --warn:#b08400;
@@ -86,11 +92,33 @@ a:hover{text-decoration:underline}
 .list .li:first-child{border-top:0}
 .footer{margin-top:26px; color:var(--muted); font-size:11px; text-align:center}
 .pill{font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:2px 6px}
-</style></head><body><div class="wrap">
+
+/* --- the shared-receipt page, and nowhere else ---------------------------
+   This is the only view with no operator on it: no nav back to the books, no
+   id, no tenant. The rules are page-local because none of them has a second
+   caller, and they should stay that way. */
+.claim{font-size:11px; text-transform:uppercase; letter-spacing:2px; color:var(--muted); margin:0 0 14px}
+.sharefoot{margin-top:22px; text-align:center; color:var(--muted); font-size:11px;
+  text-transform:uppercase; letter-spacing:1.5px}
+/* A LINK THAT NO LONGER WORKS IS NOT AN ERROR PAGE. Not red, no apology, no
+   retry — there is nothing the reader can do and no reason to imply there is. */
+.gone{background:var(--card); border:1px solid var(--line); border-radius:4px;
+  padding:44px 30px; text-align:center}
+.gone b{display:block; font-family:"Fraunces",serif; font-weight:600; font-size:19px; margin-bottom:8px}
+.gone span{color:var(--muted)}
+</style>`;
+
+const HEAD = DOC_OPEN + `<title>Receipt Enricher</title>
+` + FONTS + STYLE + `</head><body><div class="wrap">
 <div class="brand"><h1>Receipt&nbsp;Enricher</h1><span class="tag">grocery&nbsp;ledger</span></div>`;
 
 const FOOT = `<div class="footer">self-hosted · node + redis + bullmq · powered by Tavily image lookup</div>
 </div></body></html>`;
+
+// The shared page closes without the operator's footer. `node + redis + bullmq`
+// is a note to whoever runs this thing, and the one person guaranteed not to be
+// reading a shared receipt is whoever runs this thing.
+const SHARE_FOOT = `</div></body></html>`;
 
 // The provenance link under a receipt: a photographed receipt links to its
 // photo, a retailer JSON receipt to the payload it was normalized from.
@@ -178,6 +206,108 @@ function renderReceipt(record) {
   </div>
   <p style="margin-top:14px"><a href="/api/receipts/${esc(record.id)}">view raw JSON</a> · ${sourceLink(record)}</p>
   ` + FOOT;
+}
+
+/**
+ * The head of the shared-receipt page.
+ *
+ * `noindex` is not the whole of it. Unlisted means THE URL IS THE CREDENTIAL,
+ * so the page also sends `Referrer-Policy: no-referrer` (set on the response in
+ * src/routes/shares.js, and repeated here as a meta so a saved copy of the page
+ * keeps it): a reader who clicks a link out of a shared receipt must not hand
+ * the token to the next server in the chain.
+ */
+const SHARE_HEAD =
+  DOC_OPEN +
+  `<title>A shared receipt</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+` +
+  FONTS +
+  STYLE +
+  `</head><body><div class="wrap">
+<div class="brand"><h1>Receipt&nbsp;Enricher</h1><span class="tag">grocery&nbsp;ledger</span></div>`;
+
+/**
+ * How this receipt got read, in the READER'S terms rather than in ours.
+ *
+ * `source` is an internal word — `api`, `sync`, `telegram` — and on the
+ * member's own screens it sits in a column of other sources, where it reads
+ * fine. A stranger has no column to compare it against. `sync` in particular
+ * must not surface as a product name here: whatever the member installed to
+ * make the import happen is a thing this reader has not installed and has no
+ * reason to have heard of, and naming it would be answering a question they did
+ * not ask. What they CAN tell apart is a photograph from a retailer feed, so
+ * say that. (recibbi-ux-design-atlas: `how()` in flows/receipt-link.html, and
+ * the note in docs/porting.md about the one call site that does not use
+ * `sourceLabel()`.)
+ */
+function sharedProvenance(record) {
+  if (record.source === 'sync' || record.kind === 'json') return 'synced from the retailer';
+  if (record.source === 'telegram') return 'photographed and read';
+  return 'read from a photograph';
+}
+
+/**
+ * ONE receipt, to somebody with no account.
+ *
+ * WHAT IS NOT HERE, each for its own reason:
+ *
+ *   the id            `<tenant>:<user>:<hash>` names the member. It is the
+ *                     reason the token exists; printing it gives back exactly
+ *                     what the token was for.
+ *   the nav           there is nothing to navigate to. Every other view is the
+ *                     operator's, and a door that asks for a password is a
+ *                     worse welcome than no door.
+ *   the raw JSON,     both are id-bearing routes, and neither is this reader's
+ *   the photo         business. They were sent a receipt, not a console.
+ *   the extractor     which OCR engine read it is operational trivia.
+ *   the share action  a shared page that offers to share itself is a loop.
+ *
+ * THE RESPONSE MUST NOT VARY BY VIEWER — no name, no tenant, no session read
+ * even when one happens to be present. Anything that changed with who is
+ * looking would leak whether the reader happens to be the owner.
+ *
+ * The record comes in already resolved, and NO TOKEN COMES IN AT ALL. A
+ * renderer that could derive a share URL from a record would be handing out
+ * access as a side effect of drawing a page.
+ */
+function renderSharedReceipt(record) {
+  const t = record.totals || {};
+  const items = record.items || [];
+  const itemsHtml = items.length
+    ? items.map(itemRow).join('')
+    : `<p class="empty-note">This receipt has not finished being read.</p>`;
+
+  return SHARE_HEAD + `
+  <h2 class="claim">Every item, identified and enriched</h2>
+  <div class="ticket">
+    <h2 class="store">${esc(record.store?.name || 'Unknown store')}</h2>
+    <div class="meta">${esc(record.store?.date || '')}</div>
+    ${record.summary ? `<p class="summary">${esc(record.summary)}</p>` : ''}
+    <div class="items">${itemsHtml}</div>
+    ${items.length ? totalsBlock(t) : ''}
+  </div>
+  <p class="sharefoot">Parsed by Receipt Enricher · ${esc(sharedProvenance(record))}</p>
+  ` + SHARE_FOOT;
+}
+
+/**
+ * A token that resolves to nothing.
+ *
+ * REVOKED, EXPIRED AND MISTYPED RENDER THE SAME PAGE and say the same sentence.
+ * Distinguishing them would confirm receipts to somebody guessing tokens — "this
+ * link was revoked" tells a guesser they found a real one. It is also served
+ * with a 404, which says the same nothing for every dead token.
+ */
+function renderSharedGone() {
+  return SHARE_HEAD + `
+  <h2 class="claim">A shared receipt</h2>
+  <div class="gone">
+    <b>This link is no longer available.</b>
+    <span>Whoever sent it can send a new one.</span>
+  </div>
+  ` + SHARE_FOOT;
 }
 
 // Render a receipt as transformed by an applied profile. Items, store and totals
@@ -562,6 +692,8 @@ window.__MONITOR__ = ${JSON.stringify(cfg)};
 
 module.exports = {
   renderReceipt,
+  renderSharedReceipt,
+  renderSharedGone,
   renderProfileResult,
   renderList,
   renderProfileResultList,

@@ -9,10 +9,11 @@
 //
 // A document key is `{ kind, tenant, user, id, sub }`:
 //   kind   - logical collection: receipts | receiptProfiles | profileResults |
-//            products | tenants
-//   tenant - tenant segment (for kind=tenants it just buckets the registry)
+//            products | tenants | shares | shareIndex
+//   tenant - tenant segment (for kind=tenants it just buckets the registry; for
+//            kind=shares it is '' — a share row is keyed by its token alone)
 //   user   - user segment, or '' for tenant-scoped kinds (receiptProfiles, tenants)
-//   id     - primary doc id (cacheId, rp_id, receiptCacheId, tenantId)
+//   id     - primary doc id (cacheId, rp_id, receiptCacheId, tenantId, token)
 //   sub    - secondary key, or '' (profileId for profileResults/products)
 //
 // Backend interface (all async):

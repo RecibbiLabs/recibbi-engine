@@ -312,6 +312,7 @@ All via `.env` (see `.env.example`). Highlights:
 | `PUBLIC_BASE_URL`    | `http://localhost:8080`  | Used to build shareable links                |
 | `DEFAULT_TENANT_ID`  | `main`                   | Implicit tenant when a request omits one; set **empty** for strict multi-tenant (see Multi-tenancy) |
 | `DEFAULT_USER_ID`    | `main`                   | Implicit user when a request omits one       |
+| `SHARE_TTL_DAYS`     | `30`                     | How long an unlisted share link (`/r/:token`) stays alive; `0` disables expiry |
 | `TELEGRAM_TENANT_ID` | —                        | tenant the bot's uploads belong to (empty = server default; each TG user → `tg_<id>`) |
 | `OCR_PROVIDER`       | `auto`                   | `auto` \| `vision` \| `tesseract` \| `paddle` \| `paddle-vl` (last two = optional sidecars, see PaddleOCR sidecars) |
 | `OCR_PADDLE_URL`     | `http://ocr-paddle:8090` | base URL of the PP-OCRv6 sidecar (used only when `OCR_PROVIDER=paddle`) |

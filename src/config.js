@@ -97,6 +97,18 @@ const config = {
   },
 
   // Retailer JSON ingest: structured receipt payloads posted straight from a
+  // Unlisted share links: `GET /r/:token` renders ONE receipt to somebody with
+  // no account, and the token is the whole of the credential. The row lives in
+  // its own table (src/shares.js) rather than on the receipt, because a share
+  // is a grant: revoking it must not be an edit to the receipt, and reading a
+  // receipt must not carry a live capability in it.
+  share: {
+    // How long a link stays alive. A share is a grant handed to somebody
+    // outside the system, and one that never expires is one nobody remembers
+    // to revoke. 0 disables expiry (the row then lives until it is revoked).
+    ttlDays: int(process.env.SHARE_TTL_DAYS, 30),
+  },
+
   // retailer's own order API (see docs/RETAILER-INGEST.md). These skip OCR
   // entirely — a per-retailer ADAPTER normalizes the payload into the same
   // canonical { store, items, totals } the OCR path produces, so everything

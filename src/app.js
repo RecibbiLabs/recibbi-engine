@@ -4,6 +4,7 @@ const express = require('express');
 const config = require('./config');
 const logger = require('./logger');
 const receipts = require('./routes/receipts');
+const shares = require('./routes/shares');
 const retailerReceipts = require('./routes/retailerReceipts');
 const receiptProfiles = require('./routes/receiptProfiles');
 const products = require('./routes/products');
@@ -67,6 +68,10 @@ function createApp() {
 
   app.use(tenantsRoute);
   app.use(receipts);
+  // Unlisted share links. Mounted after the receipt routes and before the
+  // retailer ones for no reason other than reading order — its paths (/r/:token,
+  // /api/shares/*, /api/receipts/:id/share) collide with nothing.
+  app.use(shares);
   app.use(retailerReceipts);
   app.use(receiptProfiles);
   app.use(products);
