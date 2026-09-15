@@ -99,6 +99,14 @@ queued  ──►  processing  ──►  done
 | `DELETE` | `/api/shares/:token` | Revoke a link | JSON |
 | `GET`  | `/api/shares/:token` | Resolve a token to its receipt — **no identity is read** | JSON / `404` |
 | `GET`  | `/r/:token` | The shared-receipt page — **no identity is read** | HTML / `404` |
+| `GET`  | `/api/settings` | The whole Settings screen: profile, retailer switches, and the engine's own defaults | JSON |
+| `GET`  | `/api/settings/profile` | The member's profile (an unset one reads as empty, never `404`) | JSON |
+| `PUT`  | `/api/settings/profile` | Replace it — the **whole** record, so absent means *cleared* | JSON |
+| `POST` | `/api/settings/profile/photo` | Upload a profile photograph (field `photo`; type decided by the bytes, not the header) | `201` JSON |
+| `DELETE` | `/api/settings/profile/photo` | Remove it | JSON |
+| `GET`  | `/api/settings/profile/photo/:blobId` | The photograph — scoped to the **asking** identity | image bytes / `404` |
+| `GET`  | `/api/settings/retailers` | The stored switches, plus their defaults | JSON |
+| `PUT`  | `/api/settings/retailers/:retailerId` | Flip one or both switches for a retailer | JSON |
 | `GET`  | `/api/transformers` | List available transformers | JSON array |
 | `GET`  | `/api/receiptProfiles` | List receipt profiles | JSON array |
 | `POST` | `/api/receiptProfiles` | Create a profile | `201` JSON |
@@ -128,7 +136,16 @@ queued  ──►  processing  ──►  done
 | `GET`  | `/observe/cache/products` | Alias for `/products/monitor` (same page; `?interval=<sec>`, trailing `s` ok) | HTML |
 
 The profile endpoints are documented in **[Receipt Profiles](#receipt-profiles)** below;
-the product endpoints in **[Products](#products)**.
+the product endpoints in **[Products](#products)**. The `/api/settings` endpoints —
+the member's own profile, their photograph, and the two per-retailer switches — are
+in **[docs/SETTINGS.md](SETTINGS.md)**, which also carries the reasoning: why the
+photo store is a seam, and how "applies to receipts imported from here on" is made
+structurally true rather than promised.
+
+> **Two things called a profile.** `/api/receiptProfiles` is *transformation rules
+> applied to a parsed receipt*. `/api/settings/profile` is *the member* — their
+> name, address and photograph. They are unrelated; see
+> [SETTINGS.md § 1](SETTINGS.md#1-two-things-called-a-profile).
 
 ### `GET /health`
 
@@ -140,6 +157,7 @@ curl -fsS "$BASE/health" | jq .
   "status": "ok",
   "redis": "up",
   "persistence": "sqlite",
+  "blobs": "local",
   "ocrProvider": "vision",
   "enrichment": "disabled",
   "tenants": 1,
@@ -151,7 +169,9 @@ curl -fsS "$BASE/health" | jq .
 ```
 Returns `200` when Redis is reachable, `503` (`status: "degraded"`) otherwise.
 `receiptProfiles` counts the **default tenant's** profiles. `persistence` reports
-the active durable-record backend (`filesystem` \| `sqlite` \| `postgresql`).
+the active durable-record backend (`filesystem` \| `sqlite` \| `postgresql`), and
+`blobs` the active blob backend (`local`) — see
+[SETTINGS.md § 4](SETTINGS.md#4-the-photograph-and-the-seam-under-it).
 
 ### Tenant accounts
 

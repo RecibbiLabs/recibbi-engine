@@ -75,6 +75,22 @@ function wantsEnrichment(record) {
   return !(record.options && record.options.enrich === false);
 }
 
+// Where enrichment looks first for this receipt: 'retailer' or 'web'.
+//
+// READ OFF THE RECORD, NEVER OFF THE MEMBER'S CURRENT SETTINGS, and that is the
+// point rather than a shortcut. The answer was resolved once when the receipt
+// was accepted (src/ingest/acceptService.js) and frozen here, so a retry, a
+// re-normalization after an adapter improvement, or any other second pass reads
+// a receipt exactly as it was read the first time. That is what makes the
+// Settings screen's "applies to receipts imported from here on" true of the
+// system rather than merely true of the happy path.
+//
+// Absent means 'web': every receipt written before this existed was enriched by
+// the web search, so absence describes those records correctly.
+function enrichmentSource(record) {
+  return record.options && record.options.enrichSource === 'retailer' ? 'retailer' : 'web';
+}
+
 /**
  * Run the full pipeline for a receipt id, updating the durable record at each
  * stage so progress is observable even if a later stage fails.
@@ -118,8 +134,9 @@ async function processReceipt(receiptId) {
   const items = parsed.items;
   if (wantsEnrichment(record)) {
     const { tenantId } = identity.scopeOf(receiptId);
-    const enrichStats = await enrichItems(items, parsed.store?.name, { tenantId });
-    logger.info({ id: receiptId, ...enrichStats }, 'enrichment complete');
+    const source = enrichmentSource(record);
+    const enrichStats = await enrichItems(items, parsed.store?.name, { tenantId, source });
+    logger.info({ id: receiptId, source, ...enrichStats }, 'enrichment complete');
   } else {
     logger.info({ id: receiptId, items: items.length }, 'enrichment skipped for this receipt');
   }
@@ -142,4 +159,4 @@ async function processReceipt(receiptId) {
   return finalRecord;
 }
 
-module.exports = { processReceipt };
+module.exports = { enrichmentSource, processReceipt };

@@ -106,8 +106,13 @@ router.post(
       // rather than queueing a job that fails three times with the answer.
       const { adapter, origin } = retailerIngest.acceptPayload(retailerId, parsed);
 
+      // `retailerId` is what lets the member's own "Enrich with retailer
+      // product page" setting apply to this import. Passed as the ADAPTER's id
+      // rather than the URL's spelling, so `sams-club` and `samsclub.com` reach
+      // one row of settings instead of two.
       const ctx = await accept.resolveContext(req, {
         enrichByDefault: config.retailers.enrichByDefault,
+        retailerId: adapter.id,
       });
       const scope = { tenantId: ctx.tenantId, userId: ctx.userId };
 
@@ -137,7 +142,7 @@ router.post(
         tenantId: ctx.tenantId,
         userId: ctx.userId,
         origin,
-        options: { enrich: ctx.enrich },
+        options: { enrich: ctx.enrich, enrichSource: ctx.enrichSource },
       });
 
       await externalIndex.put(scope, origin.externalId, record.id);

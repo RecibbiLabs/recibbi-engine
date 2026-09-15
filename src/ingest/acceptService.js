@@ -11,6 +11,7 @@ const config = require('../config');
 const identity = require('../identity');
 const tenants = require('../tenants');
 const profileStore = require('../receiptProfiles/profileStore');
+const retailerPrefs = require('../settings/retailerPrefs');
 const { enqueueReceipt, enqueueProcessAndApply, enqueueProcessApplyAndResolve } = require('../queue');
 
 // Error carrying an HTTP status, mapped by the app's global error handler.
@@ -54,10 +55,13 @@ function requestField(req, name) {
  * @param {object} req                Express request
  * @param {object} [opts]
  * @param {boolean} [opts.enrichByDefault=true]  enrichment default for this kind
- * @returns {Promise<{tenantId, userId, profile, wantsProducts, enrich, source}>}
+ * @param {string}  [opts.retailerId]  the retailer this payload came from, when
+ *                                     there is one. Its presence is what makes
+ *                                     the member's own retailer setting apply.
+ * @returns {Promise<{tenantId, userId, profile, wantsProducts, enrich, enrichSource, source}>}
  * @throws {AcceptError} 400 unknown tenant | 400 unknown profile
  */
-async function resolveContext(req, { enrichByDefault = true } = {}) {
+async function resolveContext(req, { enrichByDefault = true, retailerId = null } = {}) {
   // Identity for this upload: X-Tenant-Id / X-User-Id headers, tenantId/userId
   // fields, or the configured default. Tenants are provisioned accounts, so an
   // upload for an unknown tenant is rejected rather than auto-creating one.
@@ -82,12 +86,49 @@ async function resolveContext(req, { enrichByDefault = true } = {}) {
   const wantsProducts =
     !!profile && config.products.enabled && requestFlag(req, 'resolveProducts', config.products.resolveOnUpload);
 
+  // THE MEMBER'S RETAILER SETTING IS READ HERE, AT ACCEPT, AND FROZEN ONTO THE
+  // RECORD — which is the whole mechanism behind a promise the Settings screen
+  // makes in so many words:
+  //
+  //   "Applies to receipts imported from here on. 248 Sam's Club receipts
+  //    already in your books were read under the previous answer and are not
+  //    read again."
+  //
+  // If the pipeline read the preference instead, that sentence would be false
+  // the moment anything re-ran: a retried job, a re-normalization after an
+  // adapter improvement, a backfill. Each would quietly re-read an old receipt
+  // under a new answer, and the member would find their books had changed
+  // underneath them with nothing to point at. Reading it once, here, means the
+  // record carries the answer that was true WHEN IT WAS IMPORTED, and every
+  // later pass reads it off the record. The reach of the switch is then a
+  // property of the data rather than a rule somebody has to keep remembering.
+  //
+  // Precedence, most specific first:
+  //   1. an explicit `enrich=` on THIS request  — one upload, deliberately
+  //   2. the member's setting for this retailer — their standing answer
+  //   3. the deployment default                 — RETAILER_ENRICH_DEFAULT
+  let enrichDefault = enrichByDefault;
+  let enrichSource = 'web';
+  if (retailerId) {
+    const prefs = await retailerPrefs.all({ tenantId, userId });
+    if (retailerPrefs.valueOf(prefs, retailerId, 'enrichFromRetailer')) {
+      enrichDefault = true;
+      enrichSource = 'retailer';
+    }
+  }
+
+  const enrich = requestFlag(req, 'enrich', enrichDefault);
+
   return {
     tenantId,
     userId,
     profile,
     wantsProducts,
-    enrich: requestFlag(req, 'enrich', enrichByDefault),
+    enrich,
+    // Where enrichment should look FIRST when it runs. Meaningless when
+    // `enrich` is false, and left at 'web' so a record never claims a source
+    // for something that did not happen.
+    enrichSource: enrich ? enrichSource : 'web',
     source: requestField(req, 'source') || 'api',
   };
 }
