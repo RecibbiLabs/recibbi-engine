@@ -69,6 +69,18 @@ single upload goes OCR → profile → products via a 3-level BullMQ flow
 (`process-receipt` → `applyProfile` → `resolveProducts`) — and is also runnable
 on demand. See [Products in `docs/API.md`](docs/API.md#products).
 
+**Settings:** a member has a **profile** of their own — the name Recibbi calls
+them, a fully-optional address (a postal code alone is a complete one), and a
+photograph — plus two switches per retailer: *show retailer product icons* and
+*enrich with retailer product page*. Both records are scoped to
+`(tenantId, userId)` like a receipt, so ownership is structural rather than
+checked. The photograph goes through a **blob seam** (`src/blobs`) that answers
+with a URL and nothing else: local disk today, an object store later, with no
+page changing. The second switch is read **once, at accept**, and frozen onto the
+record — which is what makes *"applies to receipts imported from here on"* a
+property of the data rather than a promise. See
+[`docs/SETTINGS.md`](docs/SETTINGS.md).
+
 ---
 
 ## Components

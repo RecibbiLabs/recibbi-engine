@@ -117,6 +117,41 @@ function thumbnailOf(productInfo) {
   return text(productInfo && productInfo.imageInfo && productInfo.imageInfo.thumbnailUrl);
 }
 
+// Where the retailer publishes this product, absolute, or null.
+//
+// `productInfo.canonicalUrl` IS A PATH, NOT A URL — every one of the 14 in the
+// corpus looks like `/ip/steep-by-Bigelow-Lemon-Ginger-Herbal-Tea-60-ct/
+// 7231029088`. Stored as-is it would be resolved by whatever page rendered it,
+// which means a link on Recibbi's own site pointing at Recibbi's own 404, and
+// the bug would look like a missing page rather than a missing origin. So the
+// origin is added here, once, at the only place that knows whose catalogue this
+// is — and the field the rest of the system sees is always absolute or absent.
+//
+// COVERAGE, measured over the same 248-payload corpus as everything else in
+// this file: 14 of 1,438 lines carry one. The split is the interesting part and
+// it is not a long tail — it is a cliff:
+//
+//   online (GLASS)    14 of   19 lines   a catalogue usItemId and a product page
+//   in-club           0  of 1,419 lines   a register abbreviation and neither
+//
+// A line rung up at a till carries `offerId` — a truncated tape string like
+// "MINI CUCUMBE" (§5) — which is not a catalogue id and cannot be turned into
+// one. So retailer-sourced enrichment is, for Sam's Club today, a feature of
+// online orders, and src/enrich falls back to the web search for the rest
+// rather than leaving those lines unenriched. The Settings copy says so to the
+// member instead of letting them discover it.
+const ORIGIN = 'https://www.samsclub.com';
+
+function productUrlOf(productInfo) {
+  const raw = text(productInfo && productInfo.canonicalUrl);
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw; // already absolute; leave it alone
+  // Anything that is not a site-relative path is not something we can safely
+  // complete — `//evil.example/x` would inherit our scheme and point off-site.
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null;
+  return ORIGIN + raw;
+}
+
 /** One authoritative `categories[].items[]` entry -> a canonical item. */
 function itemFrom(raw, { returned, groupIndex }) {
   const productInfo = raw.productInfo || {};
@@ -147,6 +182,7 @@ function itemFrom(raw, { returned, groupIndex }) {
     measuredQty: measured && measured.unit ? measured.value : null,
     unit: measured ? measured.unit : null,
     imageUrl: thumbnailOf(productInfo),
+    productUrl: productUrlOf(productInfo),
     lineId: text(raw.id),
     informational: informational || undefined,
     returned: returned || undefined,
@@ -178,6 +214,7 @@ function addOnItemFrom(raw, parent) {
     measuredQty: null,
     unit: null,
     imageUrl: thumbnailOf(productInfo),
+    productUrl: productUrlOf(productInfo),
     lineId: text(raw.lineId),
     addOnOf: parent.sku || null,
     addOnType: text(raw.type),
@@ -240,6 +277,7 @@ function itemsFromSummary(summary) {
       measuredQty: null,
       unit: null,
       imageUrl: thumbnailOf(raw),
+      productUrl: productUrlOf(raw),
       lineId: text(raw.id),
     };
   });

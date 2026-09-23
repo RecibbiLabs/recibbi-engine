@@ -81,6 +81,25 @@ const config = {
     },
   },
 
+  // Blob storage: bytes addressed by their own id, behind ONE seam that answers
+  // with a URL (src/blobs). Its first tenant is the profile photograph, which is
+  // required to survive a move to an object store without a page changing — so
+  // nothing outside src/blobs ever builds a blob URL, it only stores the one it
+  // was handed. `local` writes under <dataDir>/<tenant>/<user>/blobs/; an `s3`
+  // backend is the planned drop-in and would change only what put() returns.
+  //
+  // NOTE: receipt image/payload uploads still live in uploads/ and do NOT go
+  // through this yet (src/store.js writes them directly). They can move onto it
+  // later; the seam was built for the case that has no record to derive a path
+  // from at serving time.
+  blobs: {
+    backend: (process.env.BLOB_STORE || 'local').toLowerCase(), // local | s3(TODO)
+    // A profile photograph, not a receipt. Deliberately much smaller than
+    // maxUploadBytes: an avatar is rendered at 96px and a member has no reason
+    // to send 15MB of one, while the bytes are served back on every page draw.
+    maxBytes: int(process.env.AVATAR_MAX_KB, 4096) * 1024,
+  },
+
   // Receipt Profiles: user-defined transformation rules applied to a parsed
   // receipt (see docs/RECEIPT-PROFILES.md). Definitions and results are durable
   // JSON, mirroring the receipt store. Limits guard the user-supplied rules

@@ -9,6 +9,7 @@ const retailerReceipts = require('./routes/retailerReceipts');
 const receiptProfiles = require('./routes/receiptProfiles');
 const products = require('./routes/products');
 const tenantsRoute = require('./routes/tenants');
+const settings = require('./routes/settings');
 const tenants = require('./tenants');
 const profileStore = require('./receiptProfiles/profileStore');
 const retailers = require('./retailers/registry');
@@ -51,6 +52,7 @@ function createApp() {
       status: ok ? 'ok' : 'degraded',
       redis,
       persistence: config.persistence.backend,
+      blobs: config.blobs.backend,
       ocrProvider: config.ocrProvider,
       enrichment: config.enrich.enabled ? 'enabled' : 'disabled',
       tenants: tenantCount,
@@ -75,6 +77,9 @@ function createApp() {
   app.use(retailerReceipts);
   app.use(receiptProfiles);
   app.use(products);
+  // Settings. Mounted last: its paths are all under /api/settings and collide
+  // with nothing, and nothing above it claims that prefix.
+  app.use(settings);
 
   // Error handler (multer + identity + unexpected). An error carrying an
   // explicit numeric `status` (e.g. IdentityError) wins; otherwise size errors

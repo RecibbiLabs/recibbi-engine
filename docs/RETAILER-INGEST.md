@@ -164,10 +164,40 @@ record as `options.enrich`:
 | path | default | override |
 |---|---|---|
 | `POST /api/receipts` (photo) | on | `enrich=0` |
-| `POST /api/retailer:<id>/receipts` | **off** (`RETAILER_ENRICH_DEFAULT`) | `?enrich=1` |
+| `POST /api/retailer:<id>/receipts` | the member's setting, else **off** (`RETAILER_ENRICH_DEFAULT`) | `?enrich=1` |
 
 A record with no `options` block — every receipt written before this existed —
 enriches, exactly as it always did.
+
+### The member's own answer, and where enrichment looks
+
+A member can turn this on for a retailer in Settings — *Enrich with retailer
+product page* — and that setting is read **once, at accept**, then frozen onto
+the record beside `options.enrich` as `options.enrichSource`:
+
+```
+web        (default) every line goes to the web search, as it always has
+retailer   a line the retailer published a product page for is enriched from the
+           payload itself, with no lookup at all; every other line FALLS BACK to
+           the web search rather than being left bare
+```
+
+Precedence at accept, most specific first: an explicit `enrich=` on this request,
+then the member's standing setting for this retailer, then
+`RETAILER_ENRICH_DEFAULT`.
+
+**Reading it at accept rather than in the pipeline is what makes the Settings
+screen's promise true** — *"applies to receipts imported from here on"*. If the
+pipeline consulted the live setting, a retry, a re-normalization after an adapter
+improvement, or a backfill would each quietly re-read an old receipt under a new
+answer. The record carries the answer that was true when it was imported, and
+`enrichmentSource()` in the pipeline reads it off the record.
+
+For Sam's Club the retailer path reaches 14 of 1,438 measured lines, essentially
+all of them online orders — an in-club line carries a truncated register string
+where a catalogue id would be. See
+[SETTINGS.md § 7](SETTINGS.md#7-retailer-sourced-enrichment) for the split and
+for why a line with no product page is deliberately left to the web search.
 
 ---
 

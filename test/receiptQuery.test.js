@@ -183,3 +183,44 @@ test('the facets carry what the books hold, not what the page holds', () => {
   // The count a caller needs to say WHY a range returned nothing.
   assert.equal(fx.pending, 1);
 });
+
+// --- "The order is a question for the route, not for the page." ------------
+//
+// The same table as the atlas's test/laws.test.js, so the two cannot disagree
+// about what "largest first" means. docs/proposals.md § 10 over there.
+
+test('a receipt that is not done comes first, whatever the order', () => {
+  // In byRecency() order: newest first. `q` is queued and `x` failed, both
+  // older than the finished `a`; they still lead under every sort.
+  const books = [
+    inFlight({ id: 'p', store: { name: 'Costco' } }),
+    done({ id: 'a', store: { name: 'aldi', date: '2026-08-24' }, totals: { total: 40 } }),
+    inFlight({ id: 'q', status: 'queued', store: { name: 'Zabar' } }),
+    done({ id: 'b', store: { name: 'Target', date: '2026-08-20' }, totals: { total: 5 }, items: [{ description: 'z' }] }),
+    inFlight({ id: 'x', status: 'failed', store: { name: 'Aldi' } }),
+    done({ id: 'c', store: { name: 'Aldi', date: '2026-08-10' }, totals: { total: 90 } }),
+    done({ id: 'n', store: { name: 'Aldi', date: '2026-08-01' }, totals: {} }),
+  ];
+  const ids = (s) => q.sortReceipts(books, s).map((r) => r.id).join('');
+  assert.equal(ids('newest'), 'pqx' + 'abcn');
+  assert.equal(ids('oldest'), 'pqx' + 'ncba');
+  assert.equal(ids('largest'), 'pqx' + 'cabn');
+  // A finished receipt with no total is not the smallest; it is not known.
+  assert.equal(ids('smallest'), 'pqx' + 'bacn');
+  assert.equal(ids('most_items'), 'pqx' + 'acnb');
+  assert.equal(ids('fewest_items'), 'pqx' + 'bacn');
+  // Case-blind, and a tie keeps the recency order: the Aldis newest first.
+  assert.equal(ids('store_az'), 'pqx' + 'acnb');
+  assert.equal(ids('store_za'), 'pqx' + 'bacn');
+  assert.equal(ids('banana'), ids('newest'));
+  // And it never reorders what it was handed in place.
+  assert.equal(books.map((r) => r.id).join(''), 'paqbxcn');
+});
+
+test('an unknown sort is the default, not an error', () => {
+  assert.equal(q.sortOrDefault('largest'), 'largest');
+  assert.equal(q.sortOrDefault('banana'), q.DEFAULT_SORT);
+  assert.equal(q.sortOrDefault(undefined), q.DEFAULT_SORT);
+  assert.equal(q.sortOrDefault(['largest', 'oldest']), q.DEFAULT_SORT, 'a repeated key is not a sort');
+  assert.deepEqual(q.SORTS.length, 8);
+});

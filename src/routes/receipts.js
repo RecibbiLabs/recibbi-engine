@@ -151,6 +151,12 @@ function cardRow(r) {
  * THE FILTERS APPLY TO BOTH SHAPES, because a narrowed array is still a useful
  * array; only the counts and the facets need the envelope to have anywhere to
  * go. See src/receiptQuery.js for the predicate and the two traps in it.
+ *
+ * `?sort=` ORDERS THE MATCHES BEFORE THE SLICE -- one of receiptQuery.SORTS, and
+ * an unknown value is `newest` rather than a 400. Once a caller asks for an
+ * order at all, a receipt that is not `done` comes first whatever the order,
+ * which is the atlas's rule (docs/proposals.md § 10). A caller that sends no
+ * `sort` gets the plain recency order it always has.
  */
 router.get('/api/receipts', async (req, res, next) => {
   try {
@@ -158,6 +164,7 @@ router.get('/api/receipts', async (req, res, next) => {
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
     const envelope = req.query.envelope === '1' || req.query.envelope === 'true';
     const filters = receiptQuery.parse(req.query);
+    const sort = req.query.sort === undefined ? null : receiptQuery.sortOrDefault(req.query.sort);
 
     // List only the requesting identity's receipts (header/default scope).
     const { tenantId, userId } = identity.resolveIdentity(req);
@@ -165,6 +172,7 @@ router.get('/api/receipts', async (req, res, next) => {
       tenantId,
       userId,
       filter: (r) => receiptQuery.matches(r, filters),
+      order: sort ? (list) => receiptQuery.sortReceipts(list, sort) : null,
       limit,
       offset,
     });
