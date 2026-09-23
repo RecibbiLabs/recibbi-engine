@@ -344,7 +344,7 @@ async function list({ tenantId, userId, limit = 50 } = {}) {
  * outside this function has to change for that to happen, which is why it is
  * shaped this way now.
  */
-async function query({ tenantId, userId, filter, limit = 50, offset = 0 } = {}) {
+async function query({ tenantId, userId, filter, order, limit = 50, offset = 0 } = {}) {
   const def = identity.defaultScope();
   const scope = { tenantId: tenantId || def.tenantId, userId: userId || def.userId };
   let records;
@@ -355,7 +355,12 @@ async function query({ tenantId, userId, filter, limit = 50, offset = 0 } = {}) 
   }
   records.sort(byRecency);
 
-  const matching = typeof filter === 'function' ? records.filter(filter) : records;
+  // `order` re-orders the MATCHING records, after the filter and before the
+  // slice -- the only place an order other than recency can be applied without
+  // putting the wrong page in the right order. It is handed them in byRecency()
+  // order and leans on that for its tie-breaks; see receiptQuery.sortReceipts().
+  const filtered = typeof filter === 'function' ? records.filter(filter) : records;
+  const matching = typeof order === 'function' ? order(filtered) : filtered;
   const from = Math.max(0, offset);
   return {
     records: matching.slice(from, from + limit),

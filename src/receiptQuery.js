@@ -160,6 +160,106 @@ function receiptDay(record) {
   return store.receiptDay(record);
 }
 
+// ------------------------------------------------------------------ sorting
+//
+// THE ORDER IS A QUESTION FOR THIS SIDE, NOT FOR THE CALLER. The list leaves
+// here a page at a time, and a caller re-ordering the page it was handed has
+// put the wrong receipts in the right order: "largest first" over the newest
+// page is the largest of this week, not the largest there is. So `?sort=` is
+// applied after the filter and BEFORE the slice -- store.query() takes it as
+// `order` for exactly that reason.
+//
+// THE CONTRACT IS THE ATLAS'S: `SORTS` and `sortReceipts()` in
+// ../recibbi-ux-design-atlas/assets/js/recibbi.js, and docs/proposals.md § 10.
+// Keep the spelling and the tie-breaks in step with it.
+
+/** The eight orders, by their query-string spelling. */
+const SORTS = [
+  'newest',
+  'oldest',
+  'largest',
+  'smallest',
+  'store_az',
+  'store_za',
+  'most_items',
+  'fewest_items',
+];
+
+/** The order the books have always come in, and the one an absent `sort` means. */
+const DEFAULT_SORT = 'newest';
+
+/**
+ * A known sort, or the default. `?sort=banana` is no sort, not a 400 -- the
+ * same rule dayOrNull() applies to an unreadable bound.
+ */
+function sortOrDefault(v) {
+  return typeof v === 'string' && SORTS.includes(v) ? v : DEFAULT_SORT;
+}
+
+function numKey(v) {
+  return v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v);
+}
+
+/**
+ * Store names compare lower-cased: "ALDI" and "Aldi" are one shop, and a member
+ * reading an alphabetical list does not know the till shouted.
+ */
+function storeKey(r) {
+  const n = r.store && r.store.name;
+  return n ? String(n).toLowerCase() : null;
+}
+
+/** What each non-recency order compares, and which way. */
+const SORT_BY = {
+  largest: { dir: -1, key: (r) => numKey(receiptTotal(r)) },
+  smallest: { dir: 1, key: (r) => numKey(receiptTotal(r)) },
+  most_items: { dir: -1, key: itemCount },
+  fewest_items: { dir: 1, key: itemCount },
+  store_az: { dir: 1, key: storeKey },
+  store_za: { dir: -1, key: storeKey },
+};
+
+/**
+ * The records in the order `sort` asks for. `records` MUST ARRIVE IN
+ * byRecency() ORDER -- newest first -- and every rule below leans on that.
+ *
+ *   newest   is that order, untouched.
+ *   oldest   is that order reversed, so the two are exact mirrors.
+ *   the rest compare their own number or name, and A TIE KEEPS THE RECENCY
+ *            ORDER: three receipts from Aldi read newest first under "Store A–Z".
+ *
+ * A FINISHED RECEIPT WITH NO ANSWER GOES LAST, IN BOTH DIRECTIONS. Sorting a
+ * missing total as zero would put it first under "Smallest first", which is the
+ * order claiming a price nobody read.
+ *
+ * EVERY RECEIPT THAT IS NOT `done` GOES FIRST, WHATEVER THE ORDER, newest first
+ * among themselves: it has no total or count to sort by yet, and it is the one
+ * a member is waiting on or has to act on.
+ */
+function sortReceipts(records, sort) {
+  const open = records.filter((r) => r.status !== 'done');
+  const done = records.filter((r) => r.status === 'done');
+  return open.concat(orderFinished(done, sort));
+}
+
+function orderFinished(records, sort) {
+  const s = sortOrDefault(sort);
+  if (s === 'newest') return records.slice();
+  if (s === 'oldest') return records.slice().reverse();
+  const by = SORT_BY[s];
+  return records
+    .map((r, i) => ({ r, i, k: by.key(r) }))
+    .sort((a, b) => {
+      if (a.k === null || b.k === null) {
+        if (a.k === b.k) return a.i - b.i;
+        return a.k === null ? 1 : -1;
+      }
+      const c = a.k < b.k ? -1 : a.k > b.k ? 1 : 0;
+      return c * by.dir || a.i - b.i;
+    })
+    .map((x) => x.r);
+}
+
 function matches(record, f) {
   if (f.store.length && !f.store.includes(record.store && record.store.name)) return false;
   if (f.source.length && !f.source.includes(record.source)) return false;
@@ -285,4 +385,8 @@ module.exports = {
   receiptDay,
   numOrNull,
   dayOrNull,
+  SORTS,
+  DEFAULT_SORT,
+  sortOrDefault,
+  sortReceipts,
 };

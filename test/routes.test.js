@@ -308,6 +308,37 @@ test('offset pages through the list without re-ordering it', async () => {
   assert.equal(last.more, false);
 });
 
+test('?sort= orders the books BEFORE the slice, not the page after it', async () => {
+  const all = await (await fetch(`${base}/api/receipts?envelope=1&status=done&limit=500`)).json();
+  const totals = all.records.map((r) => (r.totals && r.totals.total) ?? null).filter((t) => t !== null);
+  const largest = Math.max(...totals);
+  // One receipt per page: if the order were applied after the slice, page one
+  // would be the newest receipt rather than the largest.
+  const first = await (
+    await fetch(`${base}/api/receipts?envelope=1&status=done&sort=largest&limit=1`)
+  ).json();
+  assert.equal(first.records[0].totals.total, largest);
+  assert.equal(first.matched, all.matched, 'an order narrows nothing');
+
+  const oldest = await (
+    await fetch(`${base}/api/receipts?envelope=1&status=done&sort=oldest&limit=500`)
+  ).json();
+  assert.deepEqual(
+    oldest.records.map((r) => r.id),
+    all.records.map((r) => r.id).reverse(),
+    'oldest is newest reversed, exactly'
+  );
+});
+
+test('with a sort asked for, a receipt still being read leads the list', async () => {
+  const body = await (await fetch(`${base}/api/receipts?envelope=1&sort=largest&limit=500`)).json();
+  const firstDone = body.records.findIndex((r) => r.status === 'done');
+  assert.ok(firstDone > 0, 'the seeded in-flight receipt is on top');
+  assert.ok(body.records.slice(firstDone).every((r) => r.status === 'done'));
+  const junk = await (await fetch(`${base}/api/receipts?envelope=1&sort=banana&limit=500`)).json();
+  assert.equal(junk.matched, body.matched, 'an unknown sort is no sort, not a 400');
+});
+
 test('a filter narrows `matched` and leaves `total` alone', async () => {
   const body = await (await fetch(`${base}/api/receipts?envelope=1&store=Aldi&limit=500`)).json();
   assert.equal(body.matched, 2, 'two Aldi receipts');
