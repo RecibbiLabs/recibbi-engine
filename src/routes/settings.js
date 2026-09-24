@@ -30,6 +30,7 @@ const logger = require('../logger');
 const blobs = require('../blobs');
 const memberProfile = require('../settings/memberProfile');
 const retailerPrefs = require('../settings/retailerPrefs');
+const providerKeys = require('../settings/providerKeys');
 const { SettingsError } = require('../settings/validate');
 
 const router = express.Router();
@@ -252,6 +253,60 @@ router.put('/api/settings/retailers/:retailerId', async (req, res, next) => {
     const changes = body.settings && typeof body.settings === 'object' ? body.settings : body;
     const row = await retailerPrefs.set(scopeOf(req), req.params.retailerId, changes);
     res.json({ retailerId: retailerPrefs.prefKey(req.params.retailerId), settings: row });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Provider keys: the deployment's, not a member's --------------------------
+
+// NO SCOPE ON THESE THREE, and that is the design rather than an omission. There
+// is one Anthropic key and every member's receipts are read with it, so the
+// record is per deployment and no (tenantId, userId) names it.
+//
+// WHICH MEANS WHO MAY CALL THEM IS NOT DECIDED HERE, AND CANNOT BE. This service
+// has no idea who is asking -- it never has; see the header. recibbi-ux-main
+// refuses all three for anybody but the operator, in its route, and it is the
+// only thing on the compose network that reaches this one. That is the same
+// trust boundary every receipt route here already stands on, stated once more
+// because these three are the most valuable strings the deployment holds.
+//
+// AND NOTHING HERE ANSWERS WITH A KEY. A secret goes out as its last four
+// characters. The value never leaves this process -- see providerKeys.view().
+
+/** GET /api/settings/providers -- every provider the engine holds a key for. */
+router.get('/api/settings/providers', (req, res, next) => {
+  try {
+    res.json(providerKeys.viewAll());
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/settings/providers/:key -- a PATCH, deliberately, under a PUT verb.
+ *
+ * The caller never received the secret, so it cannot send the whole record
+ * back: a field left out, or blank, means KEEP. The provider is asked first,
+ * and a key it refuses is not stored (422, with what it answered); a provider
+ * that could not be asked stores nothing either (502).
+ */
+router.put('/api/settings/providers/:key', async (req, res, next) => {
+  try {
+    res.json(await providerKeys.save(req.params.key, req.body));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/settings/providers/:key -- what was saved HERE, only. A value in
+ * the host's .env cannot be removed by a web request, and the answer shows the
+ * .env value taking over, or nothing.
+ */
+router.delete('/api/settings/providers/:key', async (req, res, next) => {
+  try {
+    res.json(await providerKeys.remove(req.params.key));
   } catch (err) {
     next(err);
   }

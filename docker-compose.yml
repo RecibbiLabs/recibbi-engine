@@ -128,6 +128,12 @@ services:
       REDIS_URL: redis://redis:6379
       DATA_DIR: /app/data
       API_URL: http://api:8080
+    # The data volume, because the bot token can be saved from Settings ->
+    # Providers and a saved token wins over TELEGRAM_BOT_TOKEN. It lives in the
+    # engine's provider-key store on this volume (src/settings/providerKeys.js),
+    # and the bot re-reads it while running rather than once at boot.
+    volumes:
+      - receipt-data:/app/data
     depends_on:
       redis:
         condition: service_healthy

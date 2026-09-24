@@ -4,6 +4,7 @@ const fsp = require('fs/promises');
 const config = require('../config');
 const logger = require('../logger');
 const { imagePathFor } = require('../store');
+const providerKeys = require('../settings/providerKeys');
 
 const EXTRACTION_PROMPT = `You are a precise receipt transcriber. You are given a photo of a grocery store receipt.
 Transcribe the contents and respond with ONLY a JSON object (no markdown, no commentary) of this exact shape:
@@ -84,6 +85,9 @@ async function extractWithAnthropic(base64, mimeType) {
       ],
     }),
   });
+  // The last answer, for the operator's card: a key can be revoked in the
+  // provider's own dashboard without anybody here touching it.
+  providerKeys.observe('anthropic', apiKey, res.status, res.statusText);
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Anthropic API ${res.status}: ${body.slice(0, 300)}`);
@@ -118,6 +122,7 @@ async function extractWithOpenAI(base64, mimeType) {
       ],
     }),
   });
+  providerKeys.observe('openai', apiKey, res.status, res.statusText);
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`OpenAI API ${res.status}: ${body.slice(0, 300)}`);
