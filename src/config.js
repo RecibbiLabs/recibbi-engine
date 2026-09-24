@@ -16,18 +16,11 @@ function int(value, fallback) {
 
 const dataDir = path.resolve(process.env.DATA_DIR || path.join(__dirname, '..', 'data'));
 
-// Decide which OCR/extraction provider to actually use.
+// Decide which OCR/extraction provider to actually use. `auto` is resolved PER
+// CALL, at the bottom of this file: it asks whether the reader has a key, and a
+// key can now arrive from Settings -> Providers while the worker is running.
 const visionProvider = (process.env.VISION_PROVIDER || 'anthropic').toLowerCase();
-const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
-const hasOpenAI = !!process.env.OPENAI_API_KEY;
-const visionKeyPresent =
-  (visionProvider === 'anthropic' && hasAnthropic) ||
-  (visionProvider === 'openai' && hasOpenAI);
-
-let ocrProvider = (process.env.OCR_PROVIDER || 'auto').toLowerCase();
-if (ocrProvider === 'auto') {
-  ocrProvider = visionKeyPresent ? 'vision' : 'tesseract';
-}
+const ocrMode = (process.env.OCR_PROVIDER || 'auto').toLowerCase();
 
 const config = {
   env: process.env.NODE_ENV || 'development',
@@ -196,7 +189,8 @@ const config = {
   //                   PaddleOCR sidecars ship as 'paddle' (PP-OCRv6 small) and
   //                   'paddle-vl' (PaddleOCR-VL 1.6); add more by registering a
   //                   URL under ocr.rest and setting OCR_PROVIDER to its name.
-  ocrProvider, // 'vision' | 'tesseract' | 'paddle' | 'paddle-vl' | <rest backend>
+  // ocrProvider: 'vision' | 'tesseract' | 'paddle' | 'paddle-vl' | <rest backend>
+  // -- defined below with the other values that are read per call.
 
   // Generic REST OCR backends. Each entry maps an OCR_PROVIDER value to a remote
   // HTTP OCR service that the worker calls (src/ocr/rest.js). The service takes
@@ -222,13 +216,13 @@ const config = {
   vision: {
     provider: visionProvider, // 'anthropic' | 'openai'
     anthropic: {
-      apiKey: process.env.ANTHROPIC_API_KEY || '',
+      // apiKey: read per call -- see the bottom of this file.
       model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
       version: process.env.ANTHROPIC_VERSION || '2023-06-01',
       baseUrl: process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
     },
     openai: {
-      apiKey: process.env.OPENAI_API_KEY || '',
+      // apiKey: read per call -- see the bottom of this file.
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com',
     },
@@ -278,7 +272,7 @@ const config = {
     emoji: bool(process.env.PRODUCT_EMOJI_ENABLED, true),
     anthropic: {
       // Reuses the same Anthropic credentials/endpoint as the vision OCR path.
-      apiKey: process.env.ANTHROPIC_API_KEY || '',
+      // apiKey: read per call -- see the bottom of this file.
       model: process.env.PRODUCT_ANTHROPIC_MODEL || 'claude-haiku-4-5',
       version: process.env.ANTHROPIC_VERSION || '2023-06-01',
       baseUrl: process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
@@ -293,11 +287,11 @@ const config = {
 
   // Enrichment via Tavily
   enrich: {
-    enabled: bool(process.env.ENRICH_ENABLED, !!process.env.TAVILY_API_KEY),
+    // enabled: read per call -- see the bottom of this file.
     maxItems: int(process.env.ENRICH_MAX_ITEMS, 40),
     cacheTtlSeconds: int(process.env.ENRICH_CACHE_TTL_SECONDS, 60 * 60 * 24 * 7),
     tavily: {
-      apiKey: process.env.TAVILY_API_KEY || '',
+      // apiKey: read per call -- see the bottom of this file.
       baseUrl: process.env.TAVILY_BASE_URL || 'https://api.tavily.com',
       searchDepth: process.env.TAVILY_SEARCH_DEPTH || 'basic',
       maxResults: int(process.env.TAVILY_MAX_RESULTS, 3),
@@ -305,8 +299,9 @@ const config = {
   },
 
   telegram: {
-    enabled: !!process.env.TELEGRAM_BOT_TOKEN,
-    token: process.env.TELEGRAM_BOT_TOKEN || '',
+    // enabled, token: read per call -- see the bottom of this file.
+    // Where the Bot API lives. Overridable only so a test can stand one up.
+    apiRoot: (process.env.TELEGRAM_API_ROOT || 'https://api.telegram.org').replace(/\/$/, ''),
     // Where the bot uploads receipts. Inside compose this is the api service.
     apiUrl: (process.env.API_URL || `http://localhost:${int(process.env.PORT, 8080)}`).replace(/\/$/, ''),
     // Tenant the bot's uploads belong to (must be provisioned, unless it's the
@@ -316,5 +311,54 @@ const config = {
     tenantId: process.env.TELEGRAM_TENANT_ID || '',
   },
 };
+
+// --- Values read PER CALL ------------------------------------------------------
+//
+// Every provider key below can be saved from Settings -> Providers, and a saved
+// key wins over .env (src/settings/providerKeys.js). So none of them can be a
+// value captured at boot: a key saved at noon has to be the key the 12:01
+// receipt is read with, in the worker and the bot as much as in the api -- or
+// the reach line on the operator's card ("used from the next receipt read") is
+// false.
+//
+// Each is a getter over the store, so every existing `config.vision.anthropic.
+// apiKey` and every `resolver.ready(config)` became per call without changing a
+// line at the call site. So did the three answers that were DERIVED from a key
+// at boot: `ocrProvider` under `auto`, `enrich.enabled`, `telegram.enabled`.
+//
+// ASSIGNING ONE PINS IT, for this process. That is what the suite does
+// (`config.vision.anthropic.apiKey = 'sk-ant-test'`), and it is nothing a running
+// service does.
+function live(target, prop, read) {
+  let pinned;
+  Object.defineProperty(target, prop, {
+    enumerable: true,
+    configurable: true,
+    get: () => (pinned !== undefined ? pinned : read()),
+    set: (v) => {
+      pinned = v;
+    },
+  });
+}
+
+// Lazy, because the store requires this file.
+const keyOf = (pk, fk) => () => require('./settings/providerKeys').value(pk, fk);
+
+live(config.vision.anthropic, 'apiKey', keyOf('anthropic', 'apiKey'));
+live(config.vision.openai, 'apiKey', keyOf('openai', 'apiKey'));
+live(config.products.anthropic, 'apiKey', keyOf('anthropic', 'apiKey'));
+live(config.enrich.tavily, 'apiKey', keyOf('tavily', 'apiKey'));
+live(config.telegram, 'token', keyOf('telegram', 'botToken'));
+
+// Derived from the keys, so derived per call too. ENRICH_ENABLED set explicitly
+// is the operator's answer and still wins; unset, it follows whether there is a
+// Tavily key -- which is what "Without it: no line is enriched" on the card says.
+live(config.enrich, 'enabled', () => bool(process.env.ENRICH_ENABLED, !!config.enrich.tavily.apiKey));
+live(config.telegram, 'enabled', () => !!config.telegram.token);
+live(config, 'ocrProvider', () => {
+  if (ocrMode !== 'auto') return ocrMode;
+  const reader = config.vision.provider === 'openai' ? config.vision.openai : config.vision.anthropic;
+  return reader.apiKey ? 'vision' : 'tesseract';
+});
 
 module.exports = config;

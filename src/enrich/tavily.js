@@ -2,6 +2,7 @@
 
 const config = require('../config');
 const logger = require('../logger');
+const providerKeys = require('../settings/providerKeys');
 
 /**
  * Look up one item via the Tavily Search API, asking for related images.
@@ -26,6 +27,7 @@ async function searchItem(query) {
     }),
   });
 
+  providerKeys.observe('tavily', apiKey, res.status, res.statusText);
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Tavily API ${res.status}: ${body.slice(0, 200)}`);

@@ -442,3 +442,77 @@ absence that admits itself.
 - **No per-connection overrides** of the retailer switches — § 5.
 - **No migration of receipt blobs onto `src/blobs`.** The seam is built and the
   avatar uses it; moving `uploads/` is a separate change with its own backfill.
+
+## 13. Provider keys — the deployment's, and only the operator's
+
+Settings → Providers, designed in the atlas (`docs/settings.md` § 3b,
+`docs/proposals.md` § 9). Every outside service the engine calls and the key it
+calls it with: **Anthropic, OpenAI, Tavily and the Telegram bot**. Clerk and
+Auth0 are `recibbi-ux-main`'s own keys and live there; DeepSeek is called by
+nothing, so a key for it is refused (404) rather than stored where nothing reads
+it. The store is `src/settings/providerKeys.js`; the save-time check is
+`src/settings/providerProbe.js`.
+
+**Per deployment, not per member.** There is one Anthropic key and every
+member's receipts are read with it, so no `(tenantId, userId)` names the record,
+and these routes take no scope. *Operator only* is enforced by
+`recibbi-ux-main`, in its route — the same boundary every route here stands on,
+since this service has never known who is asking (§ 8).
+
+### A saved key wins, and is read per call
+
+A value saved from Settings **overrides** `.env`. Removing it falls back to
+`.env`; a value that came from `.env` cannot be removed by a web request.
+
+Every key field in `src/config.js` is a **getter over the store**, so
+`config.vision.anthropic.apiKey`, `resolver.ready(config)` and the rest became
+per call without a change at the call site — in the api, the worker and the bot
+alike. So did the three answers that used to be derived from a key at boot:
+`ocrProvider` under `auto`, `enrich.enabled`, and `telegram.enabled`. The store is
+a **file** on the data volume rather than a persistence document because it has to
+be read synchronously, inside a getter, by three processes: a read that finds the
+file unchanged costs one `stat`.
+
+The bot now **watches** its token (every 15s): when the token in use changes it
+stops and relaunches, and with no token it waits instead of exiting. The `bot`
+service mounts the data volume for this.
+
+### A secret never leaves whole, and is sealed at rest
+
+`GET` answers with a secret's **last four characters** and where it came from;
+the value never leaves this process. Saved values are AES-256-GCM sealed under
+`PROVIDER_KEYS_SECRET` when set. Unset, a random key is minted beside the store
+(`DATA_DIR/.registry/provider-keys.secret`, mode 0600) on the first save — which
+keeps keys out of a copied JSON file, a log line or a database backup, **but not
+from whoever holds the whole volume.** Set the variable for the stronger form.
+Changing it makes saved values unreadable; they are then ignored, loudly, and
+`.env` answers — never a garbled key.
+
+### The provider is asked first, and its last answer is kept
+
+Saving calls the provider with the candidate key — one free, authenticated call
+each (`GET /v1/models` for Anthropic and OpenAI, `GET /usage` for Tavily,
+`getMe` for Telegram; each verified to answer 401 to a bogus key). A **401/403 is
+a refusal** (422, nothing stored, the key in use untouched); any other failure
+means nothing was learned about the key, and nothing is stored either (502).
+
+Every real call records the provider's answer (`observe()`), because a key can be
+revoked in the provider's dashboard without anybody here touching it. Only a 2xx
+or a 401/403 is about the key; a 429 or a 500 is not recorded. Each record carries
+a fingerprint of the key it was about, and an answer about a key that has since
+been replaced is not shown as an answer about the new one.
+
+```bash
+# Every engine-held provider. A secret is its tail, never its value.
+curl -s localhost:8080/api/settings/providers
+# { "anthropic": { "fields": { "apiKey": { "from": "saved", "tail": "Qm7w",
+#     "savedAt": "...", "envTail": "b2Tn" } }, "check": { "at": "...", "ok": true } }, ... }
+
+# Save -- a patch: a blank or absent field means KEEP. The provider is asked first.
+curl -s -X PUT localhost:8080/api/settings/providers/anthropic \
+  -H 'content-type: application/json' -d '{"apiKey":"sk-ant-..."}'
+# 422 { "error": "Anthropic did not accept it: it answered 401 Unauthorized." }
+
+# Remove what was saved here. .env answers again, or nothing does.
+curl -s -X DELETE localhost:8080/api/settings/providers/anthropic
+```

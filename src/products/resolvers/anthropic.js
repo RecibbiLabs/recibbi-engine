@@ -14,6 +14,7 @@
 
 const config = require('../../config');
 const logger = require('../../logger');
+const providerKeys = require('../../settings/providerKeys');
 
 // The system prompt is built per-call because the emoji field is optional
 // (config.products.emoji): when off we don't ask for it at all, so there's no
@@ -170,6 +171,7 @@ async function resolve(item, ctx) {
       },
       body: JSON.stringify(body),
     });
+    providerKeys.observe('anthropic', apiKey, res.status, res.statusText);
     if (!res.ok) {
       const errBody = await res.text();
       throw new Error(`Anthropic API ${res.status}: ${errBody.slice(0, 300)}`);
