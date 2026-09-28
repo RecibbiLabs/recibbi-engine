@@ -20,6 +20,10 @@ const { useTempDataDir, installFakeRedis, stubFetch, jsonResponse } = require('.
 const tmp = useTempDataDir('enrich-retailer-test');
 installFakeRedis();
 
+// These tests are about Tavily's lookup. Set before config loads, so a checkout's
+// .env choosing ENRICH_PROVIDER=deepseek cannot choose for them (dotenv never
+// overrides a variable that is already set).
+process.env.ENRICH_PROVIDER = 'tavily';
 const config = require('../src/config');
 const { enrichItems, fromRetailer } = require('../src/enrich');
 const adapter = require('../src/retailers/adapters/samsclub.com');

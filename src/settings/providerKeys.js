@@ -59,14 +59,18 @@ const logger = () => require('../logger');
 
 /**
  * The providers THIS service holds a key for, and the variable each field is
- * spelled as in .env. The atlas's catalogue.js -> PROVIDERS lists these four
- * with `holder: 'engine'`; Clerk and Auth0 are recibbi-ux-main's own, and
- * DeepSeek is nobody's -- nothing in either service calls it, so a key saved for
- * it would be read by nothing. It is refused rather than stored.
+ * spelled as in .env. The atlas's catalogue.js -> PROVIDERS lists these five
+ * with `holder: 'engine'`; Clerk and Auth0 are recibbi-ux-main's own. DeepSeek
+ * reads receipts (VISION_PROVIDER=deepseek), names products
+ * (PRODUCT_RESOLVER=deepseek) and does the enrichment lookup
+ * (ENRICH_PROVIDER=deepseek), the last two with its own server-side web search
+ * -- and a key saved for it while none is chosen is read by nothing until one
+ * is, which is the same as an OpenAI key while Anthropic is the reader.
  */
 const PROVIDERS = {
   anthropic: { name: 'Anthropic', fields: { apiKey: { env: 'ANTHROPIC_API_KEY', secret: true } } },
   openai: { name: 'OpenAI', fields: { apiKey: { env: 'OPENAI_API_KEY', secret: true } } },
+  deepseek: { name: 'DeepSeek', fields: { apiKey: { env: 'DEEPSEEK_API_KEY', secret: true } } },
   tavily: { name: 'Tavily', fields: { apiKey: { env: 'TAVILY_API_KEY', secret: true } } },
   telegram: { name: 'Telegram', fields: { botToken: { env: 'TELEGRAM_BOT_TOKEN', secret: true } } },
 };

@@ -8,7 +8,7 @@
 // NEXT call without a restart, and that an answer about an old key is never
 // shown as an answer about the new one.
 //
-// The providers are a local HTTP server standing in for all four, reached by
+// The providers are a local HTTP server standing in for all five, reached by
 // the same base-url settings the real calls use -- so the probe, the routes and
 // the call-site recording are the shipping code end to end, with no network.
 
@@ -27,9 +27,11 @@ installFakeRedis();
 // own .env cannot leak a real key into the suite.
 process.env.ANTHROPIC_API_KEY = 'sk-ant-from-env-b2Tn';
 process.env.OPENAI_API_KEY = '';
+process.env.DEEPSEEK_API_KEY = '';
 process.env.TAVILY_API_KEY = '';
 process.env.TELEGRAM_BOT_TOKEN = '';
 process.env.ENRICH_ENABLED = '';
+process.env.ENRICH_PROVIDER = 'tavily';
 process.env.OCR_PROVIDER = 'auto';
 process.env.VISION_PROVIDER = 'anthropic';
 delete process.env.PROVIDER_KEYS_SECRET;
@@ -72,6 +74,7 @@ before(async () => {
   const root = `http://127.0.0.1:${fake.address().port}`;
   process.env.ANTHROPIC_BASE_URL = root;
   process.env.OPENAI_BASE_URL = root;
+  process.env.DEEPSEEK_BASE_URL = root;
   process.env.TAVILY_BASE_URL = root;
   process.env.TELEGRAM_API_ROOT = root;
 
@@ -105,7 +108,7 @@ test('GET answers every engine provider, and a secret as its last four character
   const text = await res.text();
   const body = JSON.parse(text);
 
-  assert.deepEqual(Object.keys(body).sort(), ['anthropic', 'openai', 'tavily', 'telegram']);
+  assert.deepEqual(Object.keys(body).sort(), ['anthropic', 'deepseek', 'openai', 'tavily', 'telegram']);
   assert.deepEqual(body.anthropic.fields.apiKey, { from: 'env', tail: 'b2Tn' });
   assert.deepEqual(body.openai.fields.apiKey, { from: null });
   assert.equal(body.anthropic.check, null);
@@ -113,8 +116,8 @@ test('GET answers every engine provider, and a secret as its last four character
   assert.ok(!text.includes('sk-ant-from-env'), 'the .env key must not appear in the answer');
 });
 
-test('Clerk, Auth0 and DeepSeek are not the engine\'s, and are refused rather than stored', async () => {
-  for (const key of ['clerk', 'auth0', 'deepseek', '__proto__']) {
+test('Clerk and Auth0 are not the engine\'s, and are refused rather than stored', async () => {
+  for (const key of ['clerk', 'auth0', '__proto__']) {
     const res = await put(key, { apiKey: 'good-whatever-1234' });
     assert.equal(res.status, 404, key);
   }
@@ -224,6 +227,45 @@ test('with nothing under it, Remove leaves the provider with no key at all', asy
   assert.equal(config.vision.openai.apiKey, '');
 });
 
+test('a DeepSeek key is checked, saved, and read per call by both the reader and the resolver', async () => {
+  assert.equal((await put('deepseek', { apiKey: 'sk-deepseek-mistyped' })).status, 422);
+  assert.equal(config.vision.deepseek.apiKey, '');
+
+  const res = await put('deepseek', { apiKey: 'good-deepseek-R2d4' });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).fields.apiKey.tail, 'R2d4');
+  assert.equal(config.vision.deepseek.apiKey, 'good-deepseek-R2d4');
+  assert.equal(config.products.deepseek.apiKey, 'good-deepseek-R2d4');
+
+  await keys.remove('deepseek');
+  assert.equal(config.products.deepseek.apiKey, '');
+});
+
+test('enrichment follows the key of the provider that does it', async () => {
+  config.enrich.provider = 'deepseek';
+  try {
+    assert.equal(config.enrich.enabled, false, 'a Tavily key does not enrich for DeepSeek');
+    await keys.save('deepseek', { apiKey: 'good-deepseek-R2d4' }, { probe: async () => ({ ok: true }) });
+    assert.equal(config.enrich.enabled, true);
+    assert.equal(config.enrich.deepseek.apiKey, 'good-deepseek-R2d4');
+  } finally {
+    config.enrich.provider = 'tavily';
+    await keys.remove('deepseek');
+  }
+});
+
+test('"auto" OCR under VISION_PROVIDER=deepseek follows the DeepSeek key, not Anthropic\'s', async () => {
+  config.vision.provider = 'deepseek';
+  try {
+    assert.equal(config.ocrProvider, 'tesseract', 'an Anthropic key does not read for DeepSeek');
+    await keys.save('deepseek', { apiKey: 'good-deepseek-R2d4' }, { probe: async () => ({ ok: true }) });
+    assert.equal(config.ocrProvider, 'vision');
+  } finally {
+    config.vision.provider = 'anthropic';
+    await keys.remove('deepseek');
+  }
+});
+
 // --- the last answer ------------------------------------------------------------
 
 test('a real call that is refused is recorded, and shown -- red -- on the card', async () => {
@@ -305,6 +347,7 @@ test('the probes ask each provider its own cheap question, and nothing that cost
   assert.equal((await probe('openai', { apiKey: 'nope-1234' })).refused, true);
   assert.equal((await probe('tavily', { apiKey: 'good-t-1234' })).ok, true);
   assert.equal((await probe('telegram', { botToken: 'good-1:abc' })).ok, true);
+  assert.equal((await probe('deepseek', { apiKey: 'good-d-1234' })).ok, true);
   assert.deepEqual(seen.map((s) => s.url.replace(/bot[^/]+/, 'bot<token>')),
-    ['/v1/models?limit=1', '/v1/models', '/usage', '/bot<token>/getMe']);
+    ['/v1/models?limit=1', '/v1/models', '/usage', '/bot<token>/getMe', '/models']);
 });

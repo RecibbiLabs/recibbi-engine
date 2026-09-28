@@ -110,7 +110,8 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
     );
   }
 
-  const model = resolver.id === 'anthropic' ? config.products.anthropic.model : null;
+  // Each resolver with a model keeps its settings under config.products.<id>.
+  const model = (config.products[resolver.id] && config.products[resolver.id].model) || null;
   const storeName = profileResult.store ? profileResult.store.name : null;
   // Emit one monitor event per lookup (best-effort; see productEvents). The
   // `dryRun` flag rides along so the console can distinguish probe runs.
@@ -191,7 +192,7 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
     receiptProfileId: profile.id,
     receiptProfileName: profile.name,
     resolver: resolver.id,
-    model: resolver.id === 'anthropic' ? config.products.anthropic.model : null,
+    model,
     resolvedAt: new Date().toISOString(),
     dryRun: !!dryRun,
     store: profileResult.store || { name: null, date: null },

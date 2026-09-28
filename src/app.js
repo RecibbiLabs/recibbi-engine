@@ -54,7 +54,11 @@ function createApp() {
       persistence: config.persistence.backend,
       blobs: config.blobs.backend,
       ocrProvider: config.ocrProvider,
+      // Which model reads a photo when ocrProvider is 'vision'.
+      visionProvider: config.vision.provider,
       enrichment: config.enrich.enabled ? 'enabled' : 'disabled',
+      // Who does the enrichment lookup: tavily | deepseek.
+      enrichmentProvider: config.enrich.provider,
       tenants: tenantCount,
       defaultTenant: config.defaultTenantId || null,
       receiptProfiles: receiptProfileCount,

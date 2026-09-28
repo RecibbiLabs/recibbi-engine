@@ -8,6 +8,7 @@
 //
 //   anthropic  GET  /v1/models              x-api-key       401 authentication_error
 //   openai     GET  /v1/models              Bearer          401 invalid_api_key
+//   deepseek   GET  /models                 Bearer          401 authentication_error
 //   tavily     GET  /usage                  Bearer          401 "missing or invalid API key"
 //   telegram   GET  /bot<token>/getMe                       401 Unauthorized
 //
@@ -31,6 +32,10 @@ const CALLS = {
   ],
   openai: (v) => [
     `${config.vision.openai.baseUrl}/v1/models`,
+    { headers: { authorization: `Bearer ${v.apiKey}` } },
+  ],
+  deepseek: (v) => [
+    `${config.vision.deepseek.baseUrl}/models`,
     { headers: { authorization: `Bearer ${v.apiKey}` } },
   ],
   tavily: (v) => [

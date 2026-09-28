@@ -159,7 +159,9 @@ curl -fsS "$BASE/health" | jq .
   "persistence": "sqlite",
   "blobs": "local",
   "ocrProvider": "vision",
+  "visionProvider": "anthropic",
   "enrichment": "disabled",
+  "enrichmentProvider": "tavily",
   "tenants": 1,
   "defaultTenant": "main",
   "receiptProfiles": 1,
@@ -170,7 +172,9 @@ curl -fsS "$BASE/health" | jq .
 Returns `200` when Redis is reachable, `503` (`status: "degraded"`) otherwise.
 `receiptProfiles` counts the **default tenant's** profiles. `persistence` reports
 the active durable-record backend (`filesystem` \| `sqlite` \| `postgresql`), and
-`blobs` the active blob backend (`local`) — see
+`blobs` the active blob backend (`local`), and `visionProvider` the model that
+reads a photo when `ocrProvider` is `vision` (`anthropic` \| `openai` \|
+`deepseek`) — see
 [SETTINGS.md § 4](SETTINGS.md#4-the-photograph-and-the-seam-under-it).
 
 ### Tenant accounts
@@ -743,7 +747,12 @@ substantiates it). The backend is a configurable **resolver** (an adapter)
 chosen by `PRODUCT_RESOLVER` — like `OCR_PROVIDER` picks the OCR engine, not a
 per-receipt record. The shipped resolver, `anthropic`, calls a low-end Anthropic
 model (`claude-haiku-4-5` by default) and — when `PRODUCT_ANTHROPIC_WEB_SEARCH`
-is on (default) — grounds the link with Anthropic's server-side web search.
+is on (default) — grounds the link with Anthropic's server-side web search. The
+`deepseek` resolver (`PRODUCT_RESOLVER=deepseek`) calls DeepSeek instead and, with
+`PRODUCT_DEEPSEEK_WEB_SEARCH` on (default), grounds the link with DeepSeek's
+server-side web search. A `productUrl` is kept only when the search returned that
+page; one the model assembled is dropped to `null` and the rest of the product
+stands. With it off, a link is returned only when the model is certain of it.
 
 Resolution always runs **after a receipt profile has been applied** (it reads
 the profile result's items) and is keyed by the source `receiptProfileId`.
@@ -820,7 +829,7 @@ open  "$BASE/products"                                      # HTML list of all p
 > the profile view, the HTML product view renders only a **stored** result (it
 > won't resolve fresh on a miss, since resolution makes live backend calls).
 > Configure with `PRODUCT_RESOLVER`, `PRODUCT_ANTHROPIC_MODEL`,
-> `PRODUCT_ANTHROPIC_WEB_SEARCH`, `PRODUCT_MAX_ITEMS`, `PRODUCT_CONCURRENCY`,
+> `PRODUCT_ANTHROPIC_WEB_SEARCH`, `PRODUCT_DEEPSEEK_MODEL`, `PRODUCT_MAX_ITEMS`, `PRODUCT_CONCURRENCY`,
 > `PRODUCT_CACHE_ENABLED`, `PRODUCT_CACHE_TTL_SECONDS`, `PRODUCT_RESOLVE_ON_UPLOAD`,
 > `PRODUCT_EMOJI_ENABLED`, `PRODUCTS_ENABLED` (see the README Configuration reference).
 
@@ -872,10 +881,14 @@ a missing `ttlSeconds` falls back to `PRODUCT_CACHE_TTL_SECONDS`. Response:
 
 ## Notes
 
-- **Enrichment** (per-item images/metadata via Tavily) only runs when
-  `TAVILY_API_KEY` is set; otherwise items list cleanly with no `imageUrl`.
+- **Enrichment** (per-item lookup) only runs when the chosen provider has a key:
+  Tavily (`TAVILY_API_KEY`, the default) adds an image and a page; with
+  `ENRICH_PROVIDER=deepseek` (`DEEPSEEK_API_KEY`) DeepSeek's web search adds the
+  product's name, a page its search returned, a sentence and an emoji, with
+  `source: "deepseek"` and no `imageUrl`. Otherwise items list cleanly with no
+  enrichment.
 - **Extraction quality**: a vision model (`ANTHROPIC_API_KEY` /
-  `VISION_PROVIDER=openai`) reads layout and returns clean items; with no key it
+  `VISION_PROVIDER=openai` / `VISION_PROVIDER=deepseek`) reads layout and returns clean items; with no key it
   falls back to offline Tesseract OCR (best on an upright, sharp photo).
 - **No HEIC**: convert iPhone HEIC photos to JPEG/PNG before uploading.
 - The id is the composite `"<tenant>:<user>:<cacheId>"` (the `cacheId` is a
