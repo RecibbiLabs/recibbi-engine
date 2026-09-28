@@ -101,3 +101,41 @@ test('OpenAI path uses chat/completions with a data: image URL', async () => {
   const out = await vision.extract(record);
   assert.equal(out.structured.store.name, 'Costco');
 });
+
+test('DeepSeek path uses /chat/completions with a data: image, JSON mode, and thinking off', async () => {
+  config.vision.provider = 'deepseek';
+  config.vision.deepseek.apiKey = 'sk-deepseek-test';
+  config.vision.deepseek.model = 'deepseek-flash';
+  config.vision.deepseek.thinking = false;
+  restoreFetch = stubFetch((url, opts) => {
+    // DeepSeek's OpenAI-format path has no /v1 prefix.
+    assert.match(url, /api\.deepseek\.com\/chat\/completions$/);
+    assert.equal(opts.headers.authorization, 'Bearer sk-deepseek-test');
+    const body = JSON.parse(opts.body);
+    assert.equal(body.model, 'deepseek-flash');
+    assert.deepEqual(body.response_format, { type: 'json_object' });
+    assert.deepEqual(body.thinking, { type: 'disabled' });
+    // Images are accepted only in user messages.
+    assert.equal(body.messages[0].role, 'user');
+    const img = body.messages[0].content.find((b) => b.type === 'image_url');
+    assert.match(img.image_url.url, /^data:image\/jpeg;base64,/);
+    return jsonResponse({ choices: [{ message: { content: JSON.stringify(structured) }, finish_reason: 'stop' }] });
+  });
+  const out = await vision.extract(record);
+  assert.equal(out.structured.store.name, 'Costco');
+  assert.equal(out.structured.items.length, structured.items.length);
+});
+
+test('DeepSeek empty content fails the attempt (so the job retries) instead of sealing no items', async () => {
+  config.vision.provider = 'deepseek';
+  config.vision.deepseek.apiKey = 'sk-deepseek-test';
+  restoreFetch = stubFetch(() => jsonResponse({ choices: [{ message: { content: '' }, finish_reason: 'stop' }] }));
+  await assert.rejects(() => vision.extract(record), /DeepSeek API returned no content \(finish_reason: stop\)/);
+});
+
+test('DeepSeek non-2xx is a descriptive error', async () => {
+  config.vision.provider = 'deepseek';
+  config.vision.deepseek.apiKey = 'sk-deepseek-test';
+  restoreFetch = stubFetch(() => textResponse('{"error":{"message":"Authentication Fails"}}', { ok: false, status: 401 }));
+  await assert.rejects(() => vision.extract(record), /DeepSeek API 401: .*Authentication Fails/);
+});

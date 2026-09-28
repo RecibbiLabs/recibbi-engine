@@ -183,7 +183,7 @@ const config = {
 
   // Extraction. The provider picks the OCR engine (like PERSISTENCE picks the
   // record backend), NOT a per-receipt choice:
-  //   'vision'     — a multimodal LLM (Anthropic/OpenAI) returns structured JSON.
+  //   'vision'     — a multimodal LLM (Anthropic/OpenAI/DeepSeek) returns structured JSON.
   //   'tesseract'  — offline, in-process Tesseract OCR (the lightweight default).
   //   anything else — a REST OCR backend (see `ocr.rest` below). The two
   //                   PaddleOCR sidecars ship as 'paddle' (PP-OCRv6 small) and
@@ -214,7 +214,7 @@ const config = {
   },
 
   vision: {
-    provider: visionProvider, // 'anthropic' | 'openai'
+    provider: visionProvider, // 'anthropic' | 'openai' | 'deepseek'
     anthropic: {
       // apiKey: read per call -- see the bottom of this file.
       model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
@@ -226,6 +226,16 @@ const config = {
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com',
     },
+    deepseek: {
+      // apiKey: read per call -- see the bottom of this file.
+      // deepseek-flash is the DeepSeek model that takes image input.
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-flash',
+      baseUrl: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
+      // DeepSeek thinks by default. Transcribing a receipt is reading, not
+      // reasoning, so it is off unless asked for: thinking costs output tokens
+      // and seconds on every photo. DEEPSEEK_THINKING=1 turns it back on.
+      thinking: bool(process.env.DEEPSEEK_THINKING, false),
+    },
   },
 
   // Product resolution: the final pipeline stage. Maps each cleaned line item
@@ -233,8 +243,9 @@ const config = {
   // substantiating web link) via a configurable backend *resolver* (an adapter).
   // The resolver is chosen by config — like OCR_PROVIDER picks the OCR engine —
   // NOT by a per-receipt record. The first resolver ('anthropic') calls a
-  // low-end Anthropic model; a Tavily resolver can be added later by dropping a
-  // module in resolvers/ and setting PRODUCT_RESOLVER=tavily.
+  // low-end Anthropic model; 'deepseek' calls DeepSeek's chat model instead. A
+  // Tavily resolver can be added later by dropping a module in resolvers/ and
+  // setting PRODUCT_RESOLVER=tavily.
   products: {
     enabled: bool(process.env.PRODUCTS_ENABLED, true),
     resolver: (process.env.PRODUCT_RESOLVER || 'anthropic').toLowerCase(),
@@ -283,18 +294,48 @@ const config = {
       // to a model that can (e.g. claude-sonnet-4-6), or disable with =0.
       webSearch: bool(process.env.PRODUCT_ANTHROPIC_WEB_SEARCH, true),
     },
+    deepseek: {
+      // Reuses the same DeepSeek credentials/endpoint as the vision OCR path.
+      // apiKey: read per call -- see the bottom of this file.
+      model: process.env.PRODUCT_DEEPSEEK_MODEL || 'deepseek-flash',
+      baseUrl: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
+      thinking: bool(process.env.PRODUCT_DEEPSEEK_THINKING, false),
+      // Ground productUrl with DeepSeek's server-side web search (src/deepseekSearch.js):
+      // a link is kept only when the search actually returned it. Off, the model
+      // answers from what it knows and gives a link only when it is certain.
+      webSearch: bool(process.env.PRODUCT_DEEPSEEK_WEB_SEARCH, true),
+      // Searches allowed per line item. Each one is billed as model input tokens
+      // (DeepSeek summarizes what it retrieved), so it is capped.
+      maxSearches: int(process.env.PRODUCT_DEEPSEEK_MAX_SEARCHES, 3),
+    },
   },
 
-  // Enrichment via Tavily
+  // Enrichment: a web lookup per line item, attached as item.enrichment.
   enrich: {
     // enabled: read per call -- see the bottom of this file.
+    // Who does the lookup. 'tavily' (the default) returns a picture and a page;
+    // 'deepseek' runs DeepSeek's server-side web search and returns the
+    // product's name, a page its search returned, a sentence and an emoji --
+    // but no picture, because search results carry none.
+    provider: (process.env.ENRICH_PROVIDER || 'tavily').toLowerCase(), // tavily | deepseek
     maxItems: int(process.env.ENRICH_MAX_ITEMS, 40),
+    // Lookups run in a bounded pool. Enrichment happens BEFORE a receipt is
+    // done, and a DeepSeek search is a model turn, not a search-API hit: one at
+    // a time, a 30-line receipt would sit in "processing" for minutes.
+    concurrency: int(process.env.ENRICH_CONCURRENCY, 5),
     cacheTtlSeconds: int(process.env.ENRICH_CACHE_TTL_SECONDS, 60 * 60 * 24 * 7),
     tavily: {
       // apiKey: read per call -- see the bottom of this file.
       baseUrl: process.env.TAVILY_BASE_URL || 'https://api.tavily.com',
       searchDepth: process.env.TAVILY_SEARCH_DEPTH || 'basic',
       maxResults: int(process.env.TAVILY_MAX_RESULTS, 3),
+    },
+    deepseek: {
+      // apiKey: read per call -- see the bottom of this file.
+      model: process.env.ENRICH_DEEPSEEK_MODEL || 'deepseek-flash',
+      baseUrl: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, ''),
+      thinking: bool(process.env.ENRICH_DEEPSEEK_THINKING, false),
+      maxSearches: int(process.env.ENRICH_DEEPSEEK_MAX_SEARCHES, 2),
     },
   },
 
@@ -346,18 +387,26 @@ const keyOf = (pk, fk) => () => require('./settings/providerKeys').value(pk, fk)
 
 live(config.vision.anthropic, 'apiKey', keyOf('anthropic', 'apiKey'));
 live(config.vision.openai, 'apiKey', keyOf('openai', 'apiKey'));
+live(config.vision.deepseek, 'apiKey', keyOf('deepseek', 'apiKey'));
 live(config.products.anthropic, 'apiKey', keyOf('anthropic', 'apiKey'));
+live(config.products.deepseek, 'apiKey', keyOf('deepseek', 'apiKey'));
 live(config.enrich.tavily, 'apiKey', keyOf('tavily', 'apiKey'));
+live(config.enrich.deepseek, 'apiKey', keyOf('deepseek', 'apiKey'));
 live(config.telegram, 'token', keyOf('telegram', 'botToken'));
 
 // Derived from the keys, so derived per call too. ENRICH_ENABLED set explicitly
-// is the operator's answer and still wins; unset, it follows whether there is a
-// Tavily key -- which is what "Without it: no line is enriched" on the card says.
-live(config.enrich, 'enabled', () => bool(process.env.ENRICH_ENABLED, !!config.enrich.tavily.apiKey));
+// is the operator's answer and still wins; unset, it follows whether the chosen
+// provider has a key -- which is what "Without it: no line is enriched" on the
+// Tavily card says, and what the DeepSeek card says when DeepSeek enriches.
+live(config.enrich, 'enabled', () => {
+  const lookup = config.enrich.provider === 'deepseek' ? config.enrich.deepseek : config.enrich.tavily;
+  return bool(process.env.ENRICH_ENABLED, !!lookup.apiKey);
+});
 live(config.telegram, 'enabled', () => !!config.telegram.token);
 live(config, 'ocrProvider', () => {
   if (ocrMode !== 'auto') return ocrMode;
-  const reader = config.vision.provider === 'openai' ? config.vision.openai : config.vision.anthropic;
+  const readers = { openai: config.vision.openai, deepseek: config.vision.deepseek };
+  const reader = readers[config.vision.provider] || config.vision.anthropic;
   return reader.apiKey ? 'vision' : 'tesseract';
 });
 

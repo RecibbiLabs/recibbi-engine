@@ -5,6 +5,15 @@ const config = require('../config');
 const logger = require('../logger');
 const { cache } = require('../redis');
 const tavily = require('./tavily');
+const deepseek = require('./deepseek');
+
+// Who answers the web lookup: config.enrich.provider, read per call like the
+// keys it depends on. Both take (query, { item, storeName }); Tavily needs only
+// the query.
+function lookupProvider() {
+  return config.enrich.provider === 'deepseek' ? { id: 'deepseek', searchItem: deepseek.searchItem }
+                                               : { id: 'tavily', searchItem: tavily.searchItem };
+}
 
 // The enrichment cache is scoped PER TENANT: item enrichment is derived from a
 // tenant's receipts (private-ish), and users within a tenant tend to shop the
@@ -12,10 +21,14 @@ const tavily = require('./tavily');
 // leaking across tenants. (The product cache, by contrast, is global — a SKU's
 // product identity is the same for everyone.) Tenant defaults to the configured
 // identity so single-tenant callers need pass nothing.
-function cacheKey(query, tenantId) {
+//
+// The provider is IN the key: a Tavily answer and a DeepSeek answer to the same
+// line are different shapes (only one has a picture), and switching providers
+// must not serve the other one's. Tavily's keys are unchanged, so its cache survives.
+function cacheKey(query, tenantId, providerId = 'tavily') {
   const t = tenantId || config.defaultTenantId;
   const h = crypto.createHash('sha1').update(query.toLowerCase()).digest('hex');
-  return `${t}:enrich:tavily:${h}`;
+  return `${t}:enrich:${providerId}:${h}`;
 }
 
 function buildQuery(item, storeName) {
@@ -24,9 +37,9 @@ function buildQuery(item, storeName) {
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-async function fromCache(query, tenantId) {
+async function fromCache(query, tenantId, providerId) {
   try {
-    const raw = await cache().get(cacheKey(query, tenantId));
+    const raw = await cache().get(cacheKey(query, tenantId, providerId));
     return raw ? JSON.parse(raw) : null;
   } catch (err) {
     logger.warn({ err: err.message }, 'enrich cache read failed');
@@ -34,9 +47,9 @@ async function fromCache(query, tenantId) {
   }
 }
 
-async function toCache(query, value, tenantId) {
+async function toCache(query, value, tenantId, providerId) {
   try {
-    await cache().set(cacheKey(query, tenantId), JSON.stringify(value), 'EX', config.enrich.cacheTtlSeconds);
+    await cache().set(cacheKey(query, tenantId, providerId), JSON.stringify(value), 'EX', config.enrich.cacheTtlSeconds);
   } catch (err) {
     logger.warn({ err: err.message }, 'enrich cache write failed');
   }
@@ -94,10 +107,14 @@ function fromRetailer(item) {
  *              FALLS BACK to the web search rather than being left bare.
  *
  * Degrades gracefully: if disabled or a lookup fails, items keep enrichment=null.
- * The retailer path is the one exception — it needs neither the Tavily key nor
+ * The retailer path is the one exception — it needs neither a lookup key nor
  * the network, so it still runs when the web search is switched off entirely.
- * A deployment with no TAVILY_API_KEY that turns this switch on gets the 14
- * lines it can genuinely enrich instead of nothing.
+ * A deployment with no lookup key that turns this switch on gets the 14 lines
+ * it can genuinely enrich instead of nothing.
+ *
+ * The web lookups run in a bounded pool (config.enrich.concurrency). Which lines
+ * get one is decided first, in order, so maxItems and the stats mean exactly
+ * what they did when the lookups ran one at a time.
  *
  * @returns {Promise<{enriched:number, skipped:number, errors:number, fromRetailer:number}>}
  */
@@ -105,12 +122,14 @@ async function enrichItems(items, storeName, { tenantId, source } = {}) {
   const stats = { enriched: 0, skipped: 0, errors: 0, fromRetailer: 0 };
   const retailerFirst = source === 'retailer';
 
+  const provider = lookupProvider();
   if (!config.enrich.enabled && !retailerFirst) {
-    logger.info('enrichment disabled (no TAVILY_API_KEY); skipping');
+    logger.info({ provider: provider.id }, 'enrichment disabled (no key for the lookup provider); skipping');
     stats.skipped = items.length;
     return stats;
   }
 
+  const lookups = [];
   let processed = 0;
   for (const item of items) {
     if (processed >= config.enrich.maxItems) {
@@ -142,23 +161,53 @@ async function enrichItems(items, storeName, { tenantId, source } = {}) {
       stats.skipped += 1;
       continue;
     }
+    lookups.push({ item, query });
+    processed += 1;
+  }
+
+  // ONE LOOKUP PER QUERY. Run in parallel, two identical lines (the same item
+  // bought twice) would both miss the cache at the same moment and both be paid
+  // for; the second waits on the first instead.
+  const inFlight = new Map();
+  const lookupOnce = (query, item) => {
+    if (!inFlight.has(query)) {
+      inFlight.set(query, (async () => {
+        let result = await fromCache(query, tenantId, provider.id);
+        if (!result) {
+          result = await provider.searchItem(query, { item, storeName });
+          if (result) await toCache(query, result, tenantId, provider.id);
+        }
+        return result;
+      })());
+    }
+    return inFlight.get(query);
+  };
+
+  await inPool(lookups, config.enrich.concurrency, async ({ item, query }) => {
     try {
-      let result = await fromCache(query, tenantId);
-      if (!result) {
-        result = await tavily.searchItem(query);
-        if (result) await toCache(query, result, tenantId);
-      }
-      item.enrichment = result;
+      const result = await lookupOnce(query, item);
+      // Each line owns its own copy: the views and the profile stage treat
+      // item.enrichment as the line's, not as a shared object.
+      item.enrichment = result ? { ...result } : result;
       if (result) stats.enriched += 1;
       else stats.skipped += 1;
     } catch (err) {
-      logger.warn({ err: err.message, query }, 'enrichment lookup failed');
+      logger.warn({ err: err.message, query, provider: provider.id }, 'enrichment lookup failed');
       item.enrichment = { query, error: err.message };
       stats.errors += 1;
     }
-    processed += 1;
-  }
+  });
   return stats;
 }
 
-module.exports = { enrichItems, fromRetailer };
+/** Run fn over every entry, at most `limit` at a time. */
+async function inPool(entries, limit, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length) await fn(entries[next++]);
+  };
+  const n = Math.max(1, Math.min(limit || 1, entries.length));
+  await Promise.all(Array.from({ length: n }, worker));
+}
+
+module.exports = { enrichItems, fromRetailer, cacheKey };

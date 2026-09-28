@@ -131,6 +131,51 @@ async function extractWithOpenAI(base64, mimeType) {
   return data.choices?.[0]?.message?.content || '';
 }
 
+// DeepSeek speaks the OpenAI chat format at its own path (no /v1). Two things
+// differ from the OpenAI call above: JSON mode is asked for, because the prompt
+// already names the shape and a reply that parses is the only kind that helps;
+// and `thinking` is set explicitly, because DeepSeek thinks unless told not to.
+async function extractWithDeepSeek(base64, mimeType) {
+  const { apiKey, model, baseUrl, thinking } = config.vision.deepseek;
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 8192,
+      response_format: { type: 'json_object' },
+      thinking: { type: thinking ? 'enabled' : 'disabled' },
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: EXTRACTION_PROMPT },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+          ],
+        },
+      ],
+    }),
+  });
+  providerKeys.observe('deepseek', apiKey, res.status, res.statusText);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`DeepSeek API ${res.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const choice = data.choices?.[0];
+  const text = choice?.message?.content || '';
+  // DeepSeek documents that JSON mode can answer with empty content. That says
+  // nothing about the receipt, so it fails the attempt and the job is retried,
+  // rather than sealing a receipt with no items.
+  if (!text.trim()) {
+    throw new Error(`DeepSeek API returned no content (finish_reason: ${choice?.finish_reason || 'none'})`);
+  }
+  return text;
+}
+
 /**
  * @returns {Promise<{ rawText: string|null, structured: object|null }>}
  */
@@ -144,6 +189,8 @@ async function extract(record) {
   let text;
   if (provider === 'openai') {
     text = await extractWithOpenAI(base64, mimeType);
+  } else if (provider === 'deepseek') {
+    text = await extractWithDeepSeek(base64, mimeType);
   } else {
     text = await extractWithAnthropic(base64, mimeType);
   }

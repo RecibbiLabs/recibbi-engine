@@ -19,8 +19,16 @@ const providerKeys = require('../../settings/providerKeys');
 // The system prompt is built per-call because the emoji field is optional
 // (config.products.emoji): when off we don't ask for it at all, so there's no
 // behavior change and no wasted tokens. The base prompt is otherwise constant.
-function buildSystem(cfg) {
+//
+// `grounded` is whether the model can fetch the page it links to. A resolver
+// with no web tools (resolvers/deepseek.js) passes false, and the URL rule
+// changes from "the URL you found" -- a sentence about a search that never
+// happened -- to "a URL you are sure of, else null".
+function buildSystem(cfg, { grounded = true } = {}) {
   const emoji = !!(cfg && cfg.products && cfg.products.emoji);
+  const urlRule = grounded
+    ? `- "productUrl" must be the ONE link that best substantiates the product (a retailer or manufacturer product page preferred). Return the actual URL you found, never a guessed or placeholder URL.`
+    : `- You cannot browse, so "productUrl" is only a page you are certain exists: the brand's or retailer's official page for this product or product line. If you would have to guess the path, return null. Never construct a URL.`;
   return `You are a product-research assistant for a grocery receipt app.
 You are given a SINGLE receipt line item — possibly noisy or abbreviated (e.g. "KS SPARK WAT", "5DZ EGGS") — and possibly the store name and the price paid.
 Identify the real retail product the line refers to, then respond with ONLY a JSON object (no markdown, no commentary) of exactly this shape:
@@ -40,7 +48,7 @@ Identify the real retail product the line refers to, then respond with ONLY a JS
 }
 
 Rules:
-- "productUrl" must be the ONE link that best substantiates the product (a retailer or manufacturer product page preferred). Return the actual URL you found, never a guessed or placeholder URL.
+${urlRule}
 - Use the store name and price (when provided) to disambiguate — a store-brand abbreviation usually maps to that store's house brand.${
     emoji
       ? `

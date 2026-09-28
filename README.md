@@ -64,7 +64,9 @@ description, and the top web link that substantiates it. The backend is a
 configurable **resolver/adapter** picked by `PRODUCT_RESOLVER` (like
 `OCR_PROVIDER` picks the OCR engine); the shipped `anthropic` resolver calls a
 low-end model (`claude-haiku-4-5`) and grounds the link with Anthropic's
-server-side web search. It runs by default after a profile is applied — so a
+server-side web search; the `deepseek` resolver does the same with DeepSeek's
+server-side web search, keeping a link only when the search returned that page.
+It runs by default after a profile is applied — so a
 single upload goes OCR → profile → products via a 3-level BullMQ flow
 (`process-receipt` → `applyProfile` → `resolveProducts`) — and is also runnable
 on demand. See [Products in `docs/API.md`](docs/API.md#products).
@@ -158,11 +160,13 @@ applied (discounts folded into their line items). Run `receipts list` or visit
 | `TAVILY_API_KEY`                  | Tesseract OCR     | ✅ images/metadata |
 | `ANTHROPIC_API_KEY` (or OpenAI)   | ✅ vision model    | skipped           |
 | both                              | ✅ vision model    | ✅ images/metadata |
+| `DEEPSEEK_API_KEY` + `VISION_PROVIDER=deepseek` + `ENRICH_PROVIDER=deepseek` | ✅ vision model | ✅ names/pages/emoji (no images) |
 
 For real receipts, a **vision model is strongly recommended** — raw Tesseract on
 a crumpled phone photo is hit-or-miss, while a vision model reads the layout and
 returns clean items. The default vision model is `claude-sonnet-4-6`; override
-with `ANTHROPIC_MODEL`, or set `VISION_PROVIDER=openai` with `OPENAI_API_KEY`.
+with `ANTHROPIC_MODEL`, or set `VISION_PROVIDER=openai` with `OPENAI_API_KEY`,
+or `VISION_PROVIDER=deepseek` with `DEEPSEEK_API_KEY` (`deepseek-flash`).
 
 > Tesseract note: the English language data ships in the image
 > (`tessdata/eng.traineddata`), so it runs fully offline — no CDN download. It
@@ -330,21 +334,33 @@ All via `.env` (see `.env.example`). Highlights:
 | `OCR_PADDLE_URL`     | `http://ocr-paddle:8090` | base URL of the PP-OCRv6 sidecar (used only when `OCR_PROVIDER=paddle`) |
 | `OCR_PADDLE_VL_URL`  | `http://ocr-paddle-vl:8090` | base URL of the PaddleOCR-VL sidecar (used only when `OCR_PROVIDER=paddle-vl`) |
 | `OCR_REST_TIMEOUT_MS`| `600000`                 | per-request timeout (ms) for a REST OCR sidecar (PaddleOCR-VL is slow) |
-| `VISION_PROVIDER`    | `anthropic`              | `anthropic` \| `openai`                      |
+| `VISION_PROVIDER`    | `anthropic`              | `anthropic` \| `openai` \| `deepseek`         |
 | `ANTHROPIC_API_KEY`  | —                        | enables vision extraction                    |
 | `ANTHROPIC_MODEL`    | `claude-sonnet-4-6`      | any vision-capable Claude model              |
 | `OPENAI_API_KEY`     | —                        | alternative vision provider                  |
+| `DEEPSEEK_API_KEY`   | —                        | alternative vision provider, and the `deepseek` product resolver |
+| `DEEPSEEK_MODEL`     | `deepseek-flash`         | DeepSeek model that reads photos (must take image input) |
+| `DEEPSEEK_BASE_URL`  | `https://api.deepseek.com` | DeepSeek endpoint (OpenAI chat format) |
+| `DEEPSEEK_THINKING`  | `false`                  | let DeepSeek think before reading a photo (slower, more tokens) |
 | `TAVILY_API_KEY`     | —                        | enables item image/metadata enrichment       |
-| `ENRICH_MAX_ITEMS`   | `40`                     | cap Tavily lookups per receipt               |
+| `ENRICH_MAX_ITEMS`   | `40`                     | cap enrichment lookups per receipt           |
+| `ENRICH_PROVIDER`    | `tavily`                 | per-item lookup: `tavily` (picture + page) \| `deepseek` (DeepSeek web search: name, grounded page, sentence, emoji — no picture) |
+| `ENRICH_CONCURRENCY` | `5`                      | enrichment lookups run in parallel per receipt |
+| `ENRICH_DEEPSEEK_MODEL` | `deepseek-flash`      | model the deepseek enrichment calls          |
+| `ENRICH_DEEPSEEK_MAX_SEARCHES` | `2`            | web searches allowed per line (each is billed as model tokens) |
 | `QUEUE_CONCURRENCY`  | `2`                      | parallel receipts in the worker              |
 | `JOB_ATTEMPTS`       | `3`                      | retries with exponential backoff             |
 | `PERSISTENCE`        | `sqlite`                 | durable record backend: `sqlite` \| `filesystem` \| `postgresql` (TODO). Image blobs always stay on the filesystem |
 | `SQLITE_PATH`        | `<DATA_DIR>/receipt-enricher.db` | SQLite database file (only when `PERSISTENCE=sqlite`) |
 | `DEFAULT_PROFILE_ID` | —                        | receipt profile (id or name) applied to uploads that omit one |
 | `PRODUCTS_ENABLED`   | `true`                   | master switch for the product-resolution stage |
-| `PRODUCT_RESOLVER`   | `anthropic`              | backend resolver/adapter (the only one shipped; `tavily` is a future drop-in) |
+| `PRODUCT_RESOLVER`   | `anthropic`              | backend resolver/adapter: `anthropic` \| `deepseek` (`tavily` is a future drop-in) |
 | `PRODUCT_ANTHROPIC_MODEL` | `claude-haiku-4-5`  | model the anthropic resolver calls (set `claude-sonnet-4-6` if Haiku can't use web tools) |
 | `PRODUCT_ANTHROPIC_WEB_SEARCH` | `true`         | ground `productUrl` via Anthropic's server-side web search |
+| `PRODUCT_DEEPSEEK_MODEL` | `deepseek-flash`     | model the deepseek resolver calls |
+| `PRODUCT_DEEPSEEK_WEB_SEARCH` | `true`          | ground `productUrl` via DeepSeek's server-side web search (a link is kept only when the search returned it); off, a link only when the model is certain |
+| `PRODUCT_DEEPSEEK_MAX_SEARCHES` | `3`           | web searches allowed per line item |
+| `PRODUCT_DEEPSEEK_THINKING` | `false`           | let DeepSeek think before naming each product |
 | `PRODUCT_MAX_ITEMS`  | `100`                    | cap line items resolved per receipt (one backend call each) |
 | `PRODUCT_CONCURRENCY` | `5`                     | max per-item lookups run in parallel within one receipt |
 | `PRODUCT_CACHE_ENABLED` | `true`                | shared Redis cache in front of lookups (key: resolver+store+sku+description) |

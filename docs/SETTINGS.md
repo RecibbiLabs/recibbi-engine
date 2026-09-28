@@ -447,10 +447,14 @@ absence that admits itself.
 
 Settings → Providers, designed in the atlas (`docs/settings.md` § 3b,
 `docs/proposals.md` § 9). Every outside service the engine calls and the key it
-calls it with: **Anthropic, OpenAI, Tavily and the Telegram bot**. Clerk and
-Auth0 are `recibbi-ux-main`'s own keys and live there; DeepSeek is called by
-nothing, so a key for it is refused (404) rather than stored where nothing reads
-it. The store is `src/settings/providerKeys.js`; the save-time check is
+calls it with: **Anthropic, OpenAI, DeepSeek, Tavily and the Telegram bot**.
+Clerk and Auth0 are `recibbi-ux-main`'s own keys and live there. DeepSeek reads
+photos under `VISION_PROVIDER=deepseek`, names products under
+`PRODUCT_RESOLVER=deepseek` and does the enrichment lookup under
+`ENRICH_PROVIDER=deepseek` — the last two with DeepSeek's server-side web search
+(`src/deepseekSearch.js`). Under `ENRICH_PROVIDER=deepseek`, "is there a key"
+for enrichment is asked of DeepSeek's key, not Tavily's. It is checked on save with `GET /models`, which
+answers 401 to a key it does not know and spends nothing. The store is `src/settings/providerKeys.js`; the save-time check is
 `src/settings/providerProbe.js`.
 
 **Per deployment, not per member.** There is one Anthropic key and every
