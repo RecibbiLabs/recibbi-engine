@@ -141,12 +141,13 @@ function cardRow(r) {
  * keep working. With it, the answer is an object carrying the page AND the two
  * numbers that say what it is a page of:
  *
- *   { records, total, matched, limit, offset, more, facets }
+ *   { records, total, matched, stores, spent, limit, offset, more, facets }
  *
  * `total` is the books; `matched` is what the filters leave; neither is
  * `records.length`, which is a fact about how far the caller has paged. A list
  * heading that counts the rows it was handed tells a member with 1,284 receipts
- * that 1,260 of them have gone missing.
+ * that 1,260 of them have gone missing. `stores` and `spent` are over what
+ * matched too -- the meta row the books open on; see receiptQuery.summary().
  *
  * THE FILTERS APPLY TO BOTH SHAPES, because a narrowed array is still a useful
  * array; only the counts and the facets need the envelope to have anywhere to
@@ -173,6 +174,7 @@ router.get('/api/receipts', async (req, res, next) => {
       userId,
       filter: (r) => receiptQuery.matches(r, filters),
       order: sort ? (list) => receiptQuery.sortReceipts(list, sort) : null,
+      summarize: envelope ? receiptQuery.summary : null,
       limit,
       offset,
     });
@@ -183,6 +185,8 @@ router.get('/api/receipts', async (req, res, next) => {
       records: page.records.map(cardRow),
       total: page.total,
       matched: page.matched,
+      stores: page.summary ? page.summary.stores : 0,
+      spent: page.summary ? page.summary.spent : null,
       limit,
       offset,
       more: offset + page.records.length < page.matched,

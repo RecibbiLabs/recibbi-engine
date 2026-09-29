@@ -343,6 +343,12 @@ test('a filter narrows `matched` and leaves `total` alone', async () => {
   const body = await (await fetch(`${base}/api/receipts?envelope=1&store=Aldi&limit=500`)).json();
   assert.equal(body.matched, 2, 'two Aldi receipts');
   assert.ok(body.total > body.matched, 'the books are bigger than the filter');
+  // The meta row moves with the filter: one store, and what those two came to.
+  assert.equal(body.stores, 1);
+  const sum = body.records.reduce((a, r) => a + ((r.totals && (r.totals.total ?? r.totals.sumOfItems)) || 0), 0);
+  assert.equal(body.spent, Math.round(sum * 100) / 100);
+  const all = await (await fetch(`${base}/api/receipts?envelope=1&limit=1`)).json();
+  assert.ok(all.stores > body.stores, 'over the books, not the one-row page');
   for (const row of body.records) assert.equal(row.store.name, 'Aldi');
 });
 

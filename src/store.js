@@ -344,14 +344,15 @@ async function list({ tenantId, userId, limit = 50 } = {}) {
  * outside this function has to change for that to happen, which is why it is
  * shaped this way now.
  */
-async function query({ tenantId, userId, filter, order, limit = 50, offset = 0 } = {}) {
+async function query({ tenantId, userId, filter, order, summarize, limit = 50, offset = 0 } = {}) {
   const def = identity.defaultScope();
   const scope = { tenantId: tenantId || def.tenantId, userId: userId || def.userId };
   let records;
   try {
     records = await persistence.list({ kind: 'receipts', tenant: scope.tenantId, user: scope.userId });
   } catch {
-    return { records: [], all: [], total: 0, matched: 0 }; // invalid scope -> nothing to list
+    // invalid scope -> nothing to list
+    return { records: [], all: [], total: 0, matched: 0, summary: typeof summarize === 'function' ? summarize([]) : null };
   }
   records.sort(byRecency);
 
@@ -367,6 +368,9 @@ async function query({ tenantId, userId, filter, order, limit = 50, offset = 0 }
     all: records,
     total: records.length,
     matched: matching.length,
+    // `summarize` is asked about the MATCHES, the same set `matched` counts --
+    // a SUM and a COUNT(DISTINCT) over the WHERE, the day one can push down.
+    summary: typeof summarize === 'function' ? summarize(matching) : null,
   };
 }
 

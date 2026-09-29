@@ -337,13 +337,15 @@ Two rules a caller must not re-implement differently, both of them recorded in
 #### `?envelope=1` — the page, and what it is a page **of**
 
 ```bash
-curl -fsS "$BASE/api/receipts?envelope=1&limit=24&store=Aldi" | jq '{total, matched, more}'
+curl -fsS "$BASE/api/receipts?envelope=1&limit=24&store=Aldi" | jq '{total, matched, stores, spent, more}'
 ```
 ```json
 {
   "records": [ /* card rows — see below */ ],
   "total": 1284,
   "matched": 127,
+  "stores": 1,
+  "spent": 4812.37,
   "limit": 24,
   "offset": 0,
   "more": true,
@@ -365,7 +367,11 @@ curl -fsS "$BASE/api/receipts?envelope=1&limit=24&store=Aldi" | jq '{total, matc
 `total` is the books, `matched` is what the filters leave, and the length of the
 array is how far the caller has paged. A list heading that counts the rows it
 was handed tells a member with 1,284 receipts that 1,260 of them have gone
-missing, and then changes its mind as they scroll.
+missing, and then changes its mind as they scroll. `stores` and `spent` are
+over the matched receipts too — the meta row the books open on: how many
+distinct stores, and what the printed totals (or the items, where no total was
+printed) came to. `spent` is `null` when nothing that matched carries a total,
+so a caller draws a dash rather than a `$0.00` that reads as free.
 
 **The facets describe the books, not the page.** Every count is taken with the
 *other* groups applied and its own ignored — count `store` with the store filter

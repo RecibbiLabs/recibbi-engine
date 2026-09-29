@@ -224,3 +224,21 @@ test('an unknown sort is the default, not an error', () => {
   assert.equal(q.sortOrDefault(['largest', 'oldest']), q.DEFAULT_SORT, 'a repeated key is not a sort');
   assert.deepEqual(q.SORTS.length, 8);
 });
+
+// --- The meta row over the books: stores and what they came to --------------
+
+test('the stores and the total are over what matched, and nothing priced is null', () => {
+  const recs = [
+    done({ id: 'a', store: { name: 'Target', date: '2026-08-01' }, totals: { total: 10 } }),
+    done({ id: 'b', store: { name: 'Target', date: '2026-08-02' }, totals: { total: 5.5 } }),
+    done({ id: 'c', store: { name: 'Costco Wholesale', date: '2026-08-03' }, totals: { total: null } }),
+  ];
+  assert.deepEqual(q.summary(recs), { stores: 2, spent: 15.5 });
+  assert.deepEqual(q.summary(q.apply(recs, q.parse({ store: 'Target' }))), { stores: 1, spent: 15.5 });
+  // A total nobody printed is not $0.00.
+  assert.equal(q.summary([recs[2]]).spent, null);
+  assert.equal(q.summary([inFlight()]).spent, null, 'a receipt still being read has no total');
+  assert.deepEqual(q.summary([]), { stores: 0, spent: null });
+  // Cents, not floating-point dust.
+  assert.equal(q.summary([done({ totals: { total: 0.1 } }), done({ totals: { total: 0.2 } })]).spent, 0.3);
+});

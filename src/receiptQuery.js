@@ -148,6 +148,32 @@ function receiptTotal(record) {
 }
 
 /**
+ * WHAT THE FILTERS LEFT, IN TWO NUMBERS: how many stores, and what it came to.
+ * The atlas's Recibbi.booksSummary(), for the meta row the books open on.
+ *
+ * Over the MATCHED receipts -- not the page, which is a fact about the scroll,
+ * and not the whole books, which would not move when a member ticks a store.
+ * A receipt with no total adds nothing rather than a zero it does not mean, and
+ * `spent` is null when not one that matched carries a total: $0.00 there would
+ * read as receipts that cost nothing.
+ */
+function summary(records) {
+  const stores = new Set();
+  let spent = 0;
+  let priced = false;
+  for (const r of records || []) {
+    const name = r.store && r.store.name;
+    if (name) stores.add(name);
+    const t = receiptTotal(r);
+    if (t !== null && t !== undefined && !Number.isNaN(Number(t))) {
+      spent += Number(t);
+      priced = true;
+    }
+  }
+  return { stores: stores.size, spent: priced ? Math.round(spent * 100) / 100 : null };
+}
+
+/**
  * THE DAY THE FILTER MEANS IS THE DAY THE SORT USED.
  *
  * store.receiptDay() is what orders the list -- the day ON the receipt, parsed
@@ -382,6 +408,7 @@ module.exports = {
   facets,
   itemCount,
   receiptTotal,
+  summary,
   receiptDay,
   numOrNull,
   dayOrNull,
