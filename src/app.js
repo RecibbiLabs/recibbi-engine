@@ -8,6 +8,7 @@ const shares = require('./routes/shares');
 const retailerReceipts = require('./routes/retailerReceipts');
 const receiptProfiles = require('./routes/receiptProfiles');
 const products = require('./routes/products');
+const catalogueRoute = require('./routes/catalogue');
 const tenantsRoute = require('./routes/tenants');
 const settings = require('./routes/settings');
 const tenants = require('./tenants');
@@ -81,6 +82,10 @@ function createApp() {
   app.use(retailerReceipts);
   app.use(receiptProfiles);
   app.use(products);
+  // The product catalogue: every product a member has bought, across the books
+  // (the Products screen). Under /api/catalogue, which collides with nothing --
+  // /api/products is the resolver's per-receipt results, a different thing.
+  app.use(catalogueRoute);
   // Settings. Mounted last: its paths are all under /api/settings and collide
   // with nothing, and nothing above it claims that prefix.
   app.use(settings);

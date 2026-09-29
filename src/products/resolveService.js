@@ -17,6 +17,7 @@ const registry = require('./registry');
 const productStore = require('./productStore');
 const productCache = require('./productCache');
 const productEvents = require('./productEvents');
+const catalogue = require('../catalogue');
 const logger = require('../logger');
 
 // Run `fn` over `arr` with at most `limit` calls in flight at once, preserving
@@ -202,6 +203,11 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
 
   if (!dryRun) {
     await productStore.save(result);
+    // The resolver's brand, category and confidence reach the Products screen
+    // through the catalogue, so the receipt's purchase rows are re-derived now
+    // that there is something new to derive them from. Best-effort, like the
+    // pipeline's own indexing.
+    await catalogue.reindex(record.id);
     logger.info(
       { receiptId: record.id, receiptProfileId: profile.id, resolver: resolver.id, ...stats },
       'products resolved'

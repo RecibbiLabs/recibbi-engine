@@ -22,6 +22,7 @@
     "start": "node src/server.js",
     "server": "node src/server.js",
     "worker": "node src/worker.js",
+    "catalogue": "node src/catalogue/cli.js",
     "bot": "node src/bot.js",
     "dev:server": "node --watch src/server.js",
     "dev:worker": "node --watch src/worker.js"

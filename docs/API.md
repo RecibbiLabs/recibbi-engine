@@ -131,6 +131,11 @@ queued  ──►  processing  ──►  done
 | `GET`  | `/api/products/cache/stats` | Count of entries in the shared product cache | JSON |
 | `GET`  | `/api/products/cache/export` | Export the product cache as a portable JSON document | JSON |
 | `POST` | `/api/products/cache/import` | Import a cache export (or bare entries array); `?flush=1` clears first | JSON |
+| `GET`  | `/api/catalogue` | A page of the member's **product catalogue** — one product per store + SKU/till string across the books, filtered (`category`, `store`, `named`, `tag`, `times_min`, `times_max`), ordered (`sort`) and sliced (`limit`, `offset`) | JSON envelope |
+| `GET`  | `/api/catalogue/:id` | One product and the receipts it was on | JSON |
+| `PATCH`| `/api/catalogue/:id` | Name a product (`{ title, brand, category }`) on every receipt it was on; remembered for later receipts | JSON |
+| `GET`  | `/api/catalogue/verify` | Recompute the member's catalogue from their receipts and compare with what is stored; writes nothing | JSON report |
+| `POST` | `/api/catalogue/rebuild` | Rebuild the member's catalogue from their receipts (the backfill, per member) | JSON report |
 | `GET`  | `/products` | HTML list of all product results | HTML |
 | `GET`  | `/products/monitor` | Live, auto-refreshing technical console for lookups & cache hits (`?interval=<sec>`) | HTML |
 | `GET`  | `/observe/cache/products` | Alias for `/products/monitor` (same page; `?interval=<sec>`, trailing `s` ok) | HTML |
@@ -878,6 +883,24 @@ a missing `ttlSeconds` falls back to `PRODUCT_CACHE_TTL_SECONDS`. Response:
 `{ imported, skipped, flushed, total }`.
 
 ---
+
+## Product catalogue
+
+Every product a member has bought, once each — the data behind ux-main's
+Products screen. Scoped by `X-Tenant-Id` / `X-User-Id` like `GET /api/receipts`.
+Not to be confused with `/api/products`, which is the resolver's per-receipt
+result documents. The design, the persistence model and the backfill are in
+[CATALOGUE.md](CATALOGUE.md).
+
+```bash
+curl -s 'localhost:8080/api/catalogue?category=Dairy&sort=most_spent&limit=24' \
+  -H 'X-Tenant-Id: main' -H 'X-User-Id: main' | jq '{total, matched, receipts, first: .records[0].item.description}'
+```
+
+The envelope is `{ records, total, matched, receipts, limit, offset, more,
+facets, unpictured }`. Each record is
+`{ id, key, line, store, item, buys: [{ record: {id, store, retailer}, day, item, qty, spent, lines }], times, qty, spent, last }`
+— the shape the design atlas's `pages/products.js` builders read.
 
 ## Notes
 

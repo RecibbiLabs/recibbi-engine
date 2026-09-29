@@ -7,6 +7,7 @@ const parser = require('../parse/receiptParser');
 const retailerIngest = require('../retailers/ingestService');
 const { enrichItems } = require('../enrich');
 const identity = require('../identity');
+const catalogue = require('../catalogue');
 const logger = require('../logger');
 
 function money(n) {
@@ -147,12 +148,25 @@ async function processReceipt(receiptId) {
 
   // 4. Summarize and finalize
   const finalRecord = await store.get(receiptId);
+  // A product the member has named before is named the same way here, before
+  // the receipt is done -- so the receipt page and the Products card both say
+  // what the member said, from the first look. Never throws.
+  const remembered = await catalogue.applyRememberedNames(finalRecord);
+  if (remembered) logger.info({ id: receiptId, lines: remembered }, 'applied names the member gave these products before');
   finalRecord.summary = buildSummary(finalRecord);
   finalRecord.status = 'done';
   finalRecord.timings = { ...finalRecord.timings, totalMs: Date.now() - t0 };
   await store.save(finalRecord);
 
-  // 5. Drop the raw payload if this deployment keeps only the normalized record.
+  // 5. File its products in the member's catalogue: one purchase row per
+  // product on this receipt. AFTER the receipt is done and saved -- the rows are
+  // a projection of the record, so the record has to be final first -- and
+  // best-effort: a receipt that read perfectly is not failed because its
+  // products could not be filed. A miss is drift that `scripts/catalogue.js
+  // verify` names and `backfill` repairs. See docs/CATALOGUE.md.
+  await catalogue.indexReceiptSafely(finalRecord);
+
+  // 6. Drop the raw payload if this deployment keeps only the normalized record.
   if (isDocument && !config.retailers.storeRawPayload) {
     return store.discardDocument(receiptId);
   }
