@@ -11,6 +11,8 @@ const products = require('./routes/products');
 const catalogueRoute = require('./routes/catalogue');
 const tenantsRoute = require('./routes/tenants');
 const settings = require('./routes/settings');
+const trashRoute = require('./routes/trash');
+const trash = require('./trash');
 const tenants = require('./tenants');
 const profileStore = require('./receiptProfiles/profileStore');
 const retailers = require('./retailers/registry');
@@ -73,12 +75,19 @@ function createApp() {
         resolvers: config.products.resolvers,
         emoji: config.products.emoji,
       },
+      // How long a deleted receipt waits, and when the trash is emptied
+      // (TRASH_RETENTION, TRASH_EMPTY_CRON). The first thing to check when a
+      // trash page shows rows "due now" that never go.
+      trash: trash.settings(),
       time: new Date().toISOString(),
     });
   });
 
   app.use(tenantsRoute);
   app.use(receipts);
+  // The trash: /api/trash and three POSTs under /api/receipts/:id/ whose last
+  // segments (trash, restore, purge) no other router claims.
+  app.use(trashRoute);
   // Unlisted share links. Mounted after the receipt routes and before the
   // retailer ones for no reason other than reading order — its paths (/r/:token,
   // /api/shares/*, /api/receipts/:id/share) collide with nothing.

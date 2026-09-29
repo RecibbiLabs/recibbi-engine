@@ -63,4 +63,16 @@ async function listAll(scope) {
   return out;
 }
 
-module.exports = { save, get, list, listAll };
+// Every result filed for one receipt, removed -- for the trash's purge, which
+// is the end of the receipt and so the end of everything keyed by it.
+async function removeAll(receiptId) {
+  const s = scopeOf(receiptId);
+  if (!s) return 0;
+  let removed = 0;
+  for (const r of await persistence.list({ kind: 'products', tenant: s.tenant, user: s.user, id: s.id })) {
+    if (await persistence.delete({ kind: 'products', tenant: s.tenant, user: s.user, id: s.id, sub: r.receiptProfileId })) removed += 1;
+  }
+  return removed;
+}
+
+module.exports = { save, get, list, listAll, removeAll };

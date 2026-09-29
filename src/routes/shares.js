@@ -40,6 +40,9 @@ router.post('/api/receipts/:id/share', async (req, res, next) => {
   try {
     const record = await store.get(req.params.id);
     if (!record) return res.status(404).json({ error: 'not found' });
+    // NOT FROM THE TRASH. A link to a receipt on its way out is a link with a
+    // deadline nobody told the recipient about.
+    if (store.inTrash(record)) return res.status(409).json({ error: 'that receipt is in the trash' });
     const share = await shares.mint(record.id);
     res.status(201).json(share);
   } catch (err) {
@@ -129,6 +132,11 @@ async function resolveShared(token) {
     logger.warn({ receiptId: row.receiptId }, 'share row resolves to a missing receipt');
     return null;
   }
+  // A receipt in the trash is out of its owner's books, so it is out of
+  // everybody else's too: the reader gets the same shut door as a revoked
+  // link. The row is KEPT, so putting the receipt back brings the link back --
+  // the member never revoked it, they deleted a receipt.
+  if (store.inTrash(record)) return null;
   return record;
 }
 

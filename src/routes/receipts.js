@@ -9,6 +9,7 @@ const accept = require('../ingest/acceptService');
 const identity = require('../identity');
 const view = require('../web/view');
 const logger = require('../logger');
+const trash = require('../trash');
 
 const router = express.Router();
 
@@ -201,7 +202,9 @@ router.get('/api/receipts/:id', async (req, res, next) => {
   try {
     const record = await store.get(req.params.id);
     if (!record) return res.status(404).json({ error: 'not found' });
-    res.json({ ...record, ...links(record.id) });
+    // A receipt in the trash is still answered, with when it goes -- derived
+    // now, never stored; see src/trash/index.js.
+    res.json({ ...record, ...links(record.id), ...trash.fields(record) });
   } catch (err) {
     next(err);
   }

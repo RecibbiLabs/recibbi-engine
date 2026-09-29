@@ -292,6 +292,26 @@ function byRecency(a, b) {
   return a.id < b.id ? 1 : -1;
 }
 
+// --- the trash --------------------------------------------------------------
+//
+// A deleted receipt is still a receipt for its retention (src/trash): the
+// record keeps every field it had and gains `deletedAt` and `deletedBy`. It is
+// out of the BOOKS -- list(), query(), every count and total they feed -- but
+// get() still answers for it, because the trash page opens it and a member can
+// put it back. Filtering here rather than in each caller is the same argument
+// byRecency() makes: a caller that removes trashed rows from a page it was
+// handed has already been handed the wrong page.
+
+/** Is this record in the trash? */
+function inTrash(record) {
+  return Boolean(record && record.deletedAt);
+}
+
+/** Is this record in the member's books -- i.e. not in the trash? */
+function inBooks(record) {
+  return !inTrash(record);
+}
+
 /**
  * List a single identity's receipts, newest first -- by the date ON the
  * receipt, not the date it was read; see byRecency() above. Scope defaults to
@@ -306,7 +326,7 @@ async function list({ tenantId, userId, limit = 50 } = {}) {
   } catch {
     return []; // invalid scope -> nothing to list
   }
-  records.sort(byRecency);
+  records = records.filter(inBooks).sort(byRecency);
   return records.slice(0, limit);
 }
 
@@ -354,7 +374,9 @@ async function query({ tenantId, userId, filter, order, summarize, limit = 50, o
     // invalid scope -> nothing to list
     return { records: [], all: [], total: 0, matched: 0, summary: typeof summarize === 'function' ? summarize([]) : null };
   }
-  records.sort(byRecency);
+  // The trash is not the books: out of the page, the counts, the totals and
+  // the facets alike -- before anything else looks at them. See inBooks().
+  records = records.filter(inBooks).sort(byRecency);
 
   // `order` re-orders the MATCHING records, after the filter and before the
   // slice -- the only place an order other than recency can be applied without
@@ -372,6 +394,35 @@ async function query({ tenantId, userId, filter, order, summarize, limit = 50, o
     // a SUM and a COUNT(DISTINCT) over the WHERE, the day one can push down.
     summary: typeof summarize === 'function' ? summarize(matching) : null,
   };
+}
+
+/**
+ * One identity's receipts IN THE TRASH, most recently deleted first. The trash
+ * page's order: what was deleted a minute ago is what a member came looking for.
+ */
+async function listTrash({ tenantId, userId } = {}) {
+  const def = identity.defaultScope();
+  const scope = { tenantId: tenantId || def.tenantId, userId: userId || def.userId };
+  let records;
+  try {
+    records = await persistence.list({ kind: 'receipts', tenant: scope.tenantId, user: scope.userId });
+  } catch {
+    return [];
+  }
+  return records
+    .filter(inTrash)
+    .sort((a, b) => (a.deletedAt === b.deletedAt ? byRecency(a, b) : a.deletedAt < b.deletedAt ? 1 : -1));
+}
+
+/**
+ * Remove a receipt's record for good. The document only: the blob and
+ * everything filed beside the receipt are src/trash/index.js purge()'s to
+ * remove, which is the one caller and the one place that knows the whole list.
+ */
+async function remove(id) {
+  const key = keyOf(id);
+  if (!key) return false;
+  return persistence.delete(key);
 }
 
 /** Absolute path of a receipt's blob, whichever kind it is. */
@@ -430,6 +481,10 @@ module.exports = {
   update,
   list,
   query,
+  listTrash,
+  remove,
+  inTrash,
+  inBooks,
   receiptDay,
   imagePathFor,
   documentPathFor,

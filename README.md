@@ -340,6 +340,8 @@ All via `.env` (see `.env.example`). Highlights:
 | `DEFAULT_TENANT_ID`  | `main`                   | Implicit tenant when a request omits one; set **empty** for strict multi-tenant (see Multi-tenancy) |
 | `DEFAULT_USER_ID`    | `main`                   | Implicit user when a request omits one       |
 | `SHARE_TTL_DAYS`     | `30`                     | How long an unlisted share link (`/r/:token`) stays alive; `0` disables expiry |
+| `TRASH_RETENTION`    | `30d`                    | How long a deleted receipt waits in the trash before it is purged. A number and a unit (`30d`, `12h`, `5s`, `2 weeks`) or a bare number of days. Unreadable is a boot failure, not the default. See [docs/API.md § The trash](docs/API.md#the-trash) |
+| `TRASH_EMPTY_CRON`   | `0 3 * * *`              | When the worker sweeps the trash, in cron notation: five fields, or six with seconds first (`* * * * * *` = every second, for testing). `off` stops the sweep. A receipt goes on the first sweep after its retention is up, never before |
 | `TELEGRAM_TENANT_ID` | —                        | tenant the bot's uploads belong to (empty = server default; each TG user → `tg_<id>`) |
 | `OCR_PROVIDER`       | `auto`                   | `auto` \| `vision` \| `tesseract` \| `paddle` \| `paddle-vl` (last two = optional sidecars, see PaddleOCR sidecars) |
 | `OCR_PADDLE_URL`     | `http://ocr-paddle:8090` | base URL of the PP-OCRv6 sidecar (used only when `OCR_PROVIDER=paddle`) |

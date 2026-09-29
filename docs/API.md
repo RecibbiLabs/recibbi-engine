@@ -466,6 +466,61 @@ token.
 > own screens, which have a column of other sources to read a label against,
 > word it differently — see `sourceLabel()` in `recibbi-ux-main`.
 
+### The trash
+
+Deleting a receipt does not destroy it. It goes to the **trash** for
+`TRASH_RETENTION` (default `30d`), out of the books but still on disk, and the
+worker's sweep purges it on the first `TRASH_EMPTY_CRON` tick after that
+(default `0 3 * * *`, nightly). The design is the atlas's `flows/trash.html` and
+`docs/proposals.md` § 6; the code is `src/trash/`.
+
+| call | what it does |
+|---|---|
+| `GET /api/trash` | this identity's trash, most recently deleted first, plus the settings |
+| `GET /api/trash/settings` | the settings alone (`retention`, `sweep`); deployment-wide, no identity |
+| `POST /api/receipts/:id/trash` | out of the books. Body `{ "by": "member" \| "recibbi" }`, default `member`. `409` while the receipt is `queued`/`processing`. Idempotent: a second call keeps the first `deletedAt` |
+| `POST /api/receipts/:id/restore` | back into the books, the catalogue, and its share link works again. Idempotent |
+| `POST /api/receipts/:id/purge` | **gone for good** -- record, photograph/payload, profile and product results, catalogue rows, share link. `409` unless it is already in the trash |
+
+A trashed receipt:
+
+- is left out of `GET /api/receipts` in both shapes -- the page, `total`,
+  `matched`, `stores`, `spent` and the facets;
+- has no rows in the product catalogue (`cli.js verify` agrees);
+- does not resolve by share link (`/r/:token` is the shut door), and cannot be
+  shared (`409`) -- but its link is kept, and works again if it is put back;
+- is still answered by `GET /api/receipts/:id`, with `deletedAt`, `deletedBy`
+  and `purgeAt`.
+
+**`purgeAt` is derived, never stored**: `deletedAt` plus the retention in force
+when it is read. Changing `TRASH_RETENTION` moves every receipt already in the
+trash.
+
+```bash
+curl -fsS "$BASE/api/trash" -H 'x-tenant-id: main' -H 'x-user-id: main' | jq .
+```
+```json
+{
+  "records": [
+    { "id": "main:main:1b70d95bbd9f462f", "status": "done", "store": "Costco Wholesale",
+      "date": "2026-05-26", "items": 14, "total": 120.11,
+      "createdAt": "2026-09-01T12:00:00.000Z",
+      "deletedAt": "2026-09-29T18:00:00.000Z", "deletedBy": "member",
+      "purgeAt": "2026-10-29T18:00:00.000Z" }
+  ],
+  "retention": { "ms": 2592000000, "days": 30, "label": "30 days" },
+  "sweep": { "cron": "0 3 * * *", "next": "2026-09-30T03:00:00.000Z" }
+}
+```
+
+The same settings are on `/health` under `trash`. To sweep now, or see what is
+waiting across the deployment:
+
+```bash
+podman exec receipt-enricher_api_1 node src/trash/cli.js status
+podman exec receipt-enricher_api_1 node src/trash/cli.js sweep
+```
+
 ### `POST /api/retailer:<retailerId>/receipts`
 
 Ingest a receipt the retailer already has — the JSON its own order API returns —
