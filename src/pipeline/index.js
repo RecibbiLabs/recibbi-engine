@@ -39,14 +39,15 @@ function buildSummary(record) {
  * vision model's structured output) into the canonical shape.
  */
 async function extractFromImage(record) {
-  const { rawText, structured, provider } = await ocr.extract(record);
+  const { rawText, structured, provider, reader } = await ocr.extract(record);
   const parsed = structured
     ? parser.normalizeStructured(structured, rawText)
     : parser.parseText(rawText);
-  return {
-    parsed,
-    extraction: { provider, rawText: rawText ? rawText.slice(0, 20000) : null },
-  };
+  const extraction = { provider, rawText: rawText ? rawText.slice(0, 20000) : null };
+  // Which model read it, when a vision reader did: the order can put a
+  // different one first from one receipt to the next.
+  if (reader) extraction.reader = reader;
+  return { parsed, extraction };
 }
 
 /**
@@ -148,6 +149,13 @@ async function processReceipt(receiptId) {
 
   // 4. Summarize and finalize
   const finalRecord = await store.get(receiptId);
+  // Every line with no category gets one -- the one the member's books already
+  // give the same product, else one batched model call -- so the receipt's
+  // products arrive in the Products screen's category list with it. Before the
+  // remembered names, so a category the member gave a product is the one that
+  // stands. Never throws. See src/catalogue/categorize.js.
+  const categorized = await catalogue.categorizeReceipt(finalRecord);
+  if (categorized) logger.info({ id: receiptId, lines: categorized }, 'categorized lines that had no category');
   // A product the member has named before is named the same way here, before
   // the receipt is done -- so the receipt page and the Products card both say
   // what the member said, from the first look. Never throws.

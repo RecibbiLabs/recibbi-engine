@@ -41,6 +41,7 @@ const store = require('../store');
 const productStore = require('../products/productStore');
 const { withLock } = require('../settings/lock');
 const project = require('./project');
+const categorize = require('./categorize');
 const query = require('./query');
 
 const KIND = { purchase: 'purchases', receipt: 'purchaseIndex', product: 'catalogue' };
@@ -334,6 +335,100 @@ async function applyRememberedNames(record) {
   }
 }
 
+/* ------------------------------------------------------------ categories */
+
+/**
+ * What the member's books already say: product key -> the category its card
+ * shows (the `recibbi` source), and the categories the model is offered --
+ * the member's and this step's, not a resolver's free text (categorize.teaches).
+ */
+async function knownCategories(scope) {
+  const known = new Map();
+  const existing = new Set();
+  for (const p of await products(scope)) {
+    const view = p.item && p.item.enrichment;
+    if (!view || !view.category) continue;
+    known.set(p.key, view.category);
+    if (categorize.teaches(view)) existing.add(view.category);
+  }
+  return { known, existing: [...existing].sort() };
+}
+
+/**
+ * A CATEGORY FOR EVERY LINE OF A RECEIPT BEING READ, in place, before it is
+ * done -- so its lines land in the Products screen's category list with the
+ * receipt, rather than under no category until somebody runs a job. Run by the
+ * pipeline beside applyRememberedNames(), and before it, so a name the member
+ * gave the product (category included) is the one that stands.
+ *
+ * Returns how many lines were given a category. Never throws: a receipt is not
+ * held back because a category could not be found. See categorize.js.
+ */
+async function categorizeReceipt(record, { classify } = {}) {
+  try {
+    if (!config.products.enabled || !config.products.categorize) return 0;
+    if (!record || !Array.isArray(record.items) || !record.items.length) return 0;
+    const { known, existing } = await knownCategories(identity.scopeOf(record.id));
+    const report = await categorize.categorizeRecords([{ record, resolved: null }], { known, existing, classify });
+    return report.lines;
+  } catch (err) {
+    logger.warn({ err: err.message, receiptId: record && record.id }, 'catalogue: lines not categorized');
+    return 0;
+  }
+}
+
+/**
+ * THE ONE-OFF OVER HISTORY: every done receipt in a member's books, every line
+ * with no category given one, and the receipts' rows re-derived.
+ *
+ * One question per product across the whole history, so a few model calls
+ * answer hundreds of receipts. The answers are worked out over the receipts as
+ * listed and written onto each receipt RE-READ just before it is saved, so a
+ * name the member saved while this ran is not put back the way it was.
+ * Idempotent: the second run finds nothing to categorize and writes nothing.
+ *
+ * @param {object} scope
+ * @param {{ dryRun?: boolean, redo?: boolean, classify?: Function }} [opts]
+ *   redo: ask again about lines this step categorized before (see categorize.needsCategory)
+ */
+async function categorizeHistory(scope, { dryRun = false, redo = false, classify } = {}) {
+  const s = scopeFrom(scope);
+  const receipts = (await receiptsOf(scope)).filter((r) => r && r.status === 'done');
+  const entries = [];
+  for (const record of receipts) entries.push({ record, resolved: await resolvedOf(record.id) });
+  const report = await categorize.categorizeRecords(entries, { classify, redo, dryRun: true });
+
+  let written = 0;
+  if (!dryRun) {
+    const answered = (record, resolved) => (item) =>
+      categorize.needsCategory(item, resolved, { redo }) && report.answers.has(project.productKeyOf(record, item));
+    const touched = entries.filter(({ record, resolved }) => record.items.some(answered(record, resolved)));
+    for (const { record: { id } } of touched) {
+      const fresh = await store.get(id);
+      if (!fresh || fresh.status !== 'done') continue;
+      const resolved = await resolvedOf(id);
+      if (!categorize.applyAnswers(fresh, report.answers, resolved, { redo })) continue;
+      await store.save(fresh);
+      await indexReceiptSafely(fresh);
+      written += 1;
+    }
+  }
+  return {
+    scope: { tenantId: s.tenant, userId: s.user },
+    receipts: receipts.length,
+    dryRun: !!dryRun,
+    written,
+    products: report.products,
+    lines: report.lines,
+    byRecibbi: report.byRecibbi,
+    byModel: report.byModel,
+    unanswered: report.unanswered,
+    failed: report.failed,
+    model: report.model,
+    categories: report.categories,
+  };
+}
+
 /* ------------------------------------------------- backfill and verification */
 
 async function receiptsOf(scope) {
@@ -537,6 +632,9 @@ module.exports = {
   cleanPatch,
   nameProduct,
   applyRememberedNames,
+  knownCategories,
+  categorizeReceipt,
+  categorizeHistory,
   verify,
   rebuild,
   scopes,

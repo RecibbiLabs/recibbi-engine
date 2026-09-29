@@ -35,7 +35,7 @@ const crypto = require('crypto');
 const { receiptDay } = require('../store');
 
 /** Bumped when the row shape changes, so the verifier can say "stale" rather than "wrong". */
-const ROW_VERSION = 1;
+const ROW_VERSION = 2; // 2: enrichment.categoryBy
 
 /* The retailers the atlas's catalogue knows, by id and printed name
    (../recibbi-ux-design-atlas/assets/js/catalogue.js -> RETAILERS). Only the two
@@ -168,7 +168,7 @@ function resolvedIndex(productResults) {
 /**
  * What the Products screen reads off a line's `enrichment`, in the shape the
  * atlas's builders read it: title, brand, category, confidence, named,
- * needsReview, reviewNote, tag, emoji, imageUrl, page.
+ * needsReview, reviewNote, tag, emoji, imageUrl, page -- and categoryBy.
  *
  * THREE SOURCES, AND THE MEMBER'S IS NOT MIXED WITH ANYBODY ELSE'S. A line the
  * member named (`named: 'member'`) says exactly what they said: a brand they
@@ -205,6 +205,9 @@ function enrichmentView(item, resolved) {
     imageUrl: str(e.imageUrl),
     page: str(e.page) || str(e.url) || (member ? null : str(r.productUrl)),
     source: str(e.source),
+    // Who gave the category when src/catalogue/categorize.js did: 'recibbi'
+    // or 'model'. Null for the member's, the enrichment's and the resolver's.
+    categoryBy: member || !str(e.category) ? null : str(e.categoryBy),
   };
   const said = view.title || view.brand || view.category || view.confidence !== null || view.named ||
     view.needsReview || view.tag || view.emoji || view.imageUrl || view.page;
@@ -360,6 +363,7 @@ module.exports = {
   productKeyOf,
   productId,
   resolvedIndex,
+  resolvedFor,
   enrichmentView,
   purchases,
   assemble,

@@ -64,7 +64,9 @@ interface, so the model is shaped so that it needs neither.
 ```
 processReceipt(id)
   1-3  extract, canonicalize, enrich            (unchanged)
-  4    applyRememberedNames(record)             NEW: a product the member named
+  4    categorizeReceipt(record)                NEW: every line with no category
+                                                gets one (see "Categories" below)
+       applyRememberedNames(record)             NEW: a product the member named
                                                 before is named on this receipt too
        status = done; save
   5    indexReceiptSafely(record)               NEW: write this receipt's purchase
@@ -93,6 +95,51 @@ builders read. Three sources, merged in one place (`project.enrichmentView()`):
    Its `url` is read as the atlas's `page`.
 3. **The product resolver**: fills what the pipeline left empty, matched to
    the line by SKU, then description.
+
+## Categories
+
+The category sidebar lists every category the books hold (the atlas's
+`categoriesOf()`), so a line with no category is on no shelf. Before this step
+the only thing that gave a line a category was the product resolver: a web
+search per line, run only when a receipt profile is applied to an upload. A
+synced Sam's Club receipt never meets it. samsclub.com already sent a real name
+and a picture, so enrichment is off for it, and it sends no department either:
+`categoryPathId` is null on 289 of the 295 products in the corpus. On the first
+live books, all 295 Sam's Club products had no category.
+
+`src/catalogue/categorize.js` fills the gap with no web search. Each line is
+checked against two sources, in the atlas's `SOURCES` order:
+
+1. **`recibbi`**: the category the member's books already give the same product
+   (same store and `productKey()`) on another receipt. Nothing leaves the engine.
+2. **`model`**: the line's name, read by the product resolver's model (Anthropic,
+   or DeepSeek, whichever has a key). The questions are batched, 60 lines to a
+   call, and asked once per product rather than per line. The model is shown the
+   categories already in the books plus a seed list of warehouse-club
+   departments, and answers from them where one fits. It may name a new
+   department only when none fits. The list stays open, as the atlas requires,
+   but a history does not scatter into near-synonyms.
+
+The answer is written to `item.enrichment.category`, with
+`categoryBy: 'recibbi' | 'model'`. The projection reads it there like any other
+category.
+
+A line is never touched if the member named it (including a category they
+cleared), or if it already has a category from any source, including the
+resolver's result. So a run is idempotent. A line the model cannot place gets
+nothing rather than a guess. Set `PRODUCT_CATEGORIZE=0` to switch it off.
+
+```
+node src/catalogue/cli.js categorize [--tenant T --user U] [--dry-run] [--redo] [--json]
+```
+
+This is the one-off over history. It asks about every uncategorized product in
+the books, writes each answer onto a copy of the receipt re-read just before
+saving (so a name saved meanwhile survives), re-derives those receipts' rows,
+and then runs `verify`. `--dry-run` asks the model and prints the tally, but
+writes nothing. `--redo` asks again about lines this step categorized
+before (`categoryBy` set), for when the seed list has grown; a member's line and
+a resolver's category are still never touched.
 
 ## Naming a product
 

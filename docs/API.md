@@ -164,13 +164,15 @@ curl -fsS "$BASE/health" | jq .
   "persistence": "sqlite",
   "blobs": "local",
   "ocrProvider": "vision",
-  "visionProvider": "anthropic",
-  "enrichment": "disabled",
-  "enrichmentProvider": "tavily",
+  "visionProvider": "deepseek",
+  "visionProviders": ["anthropic", "deepseek"],
+  "enrichment": "enabled",
+  "enrichmentProvider": "deepseek",
+  "enrichmentProviders": ["tavily", "deepseek"],
   "tenants": 1,
   "defaultTenant": "main",
   "receiptProfiles": 1,
-  "products": { "enabled": true, "resolver": "anthropic" },
+  "products": { "enabled": true, "resolver": "deepseek", "resolvers": ["anthropic", "deepseek"] },
   "time": "2026-06-03T20:00:00.000Z"
 }
 ```
@@ -181,6 +183,12 @@ the active durable-record backend (`filesystem` \| `sqlite` \| `postgresql`), an
 reads a photo when `ocrProvider` is `vision` (`anthropic` \| `openai` \|
 `deepseek`) — see
 [SETTINGS.md § 4](SETTINGS.md#4-the-photograph-and-the-seam-under-it).
+`visionProviders`, `enrichmentProviders` and `products.resolvers` are each job's
+ordered list; `visionProvider`, `enrichmentProvider` and `products.resolver` are
+who would do the job **as of this request**: the first in the list with a key
+its provider has not refused, or the first in the list when none has one
+([SETTINGS.md § 14](SETTINGS.md)). The lists are read and changed at
+`GET|PUT|DELETE /api/settings/provider-order[/:job]`.
 
 ### Tenant accounts
 
@@ -911,7 +919,8 @@ facets, unpictured }`. Each record is
   `source: "deepseek"` and no `imageUrl`. Otherwise items list cleanly with no
   enrichment.
 - **Extraction quality**: a vision model (`ANTHROPIC_API_KEY` /
-  `VISION_PROVIDER=openai` / `VISION_PROVIDER=deepseek`) reads layout and returns clean items; with no key it
+  `VISION_PROVIDER=openai` / `VISION_PROVIDER=deepseek`, or a list such as
+  `VISION_PROVIDER=anthropic,deepseek`) reads layout and returns clean items; with no usable reader it
   falls back to offline Tesseract OCR (best on an upright, sharp photo).
 - **No HEIC**: convert iPhone HEIC photos to JPEG/PNG before uploading.
 - The id is the composite `"<tenant>:<user>:<cacheId>"` (the `cacheId` is a

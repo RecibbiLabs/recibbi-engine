@@ -6,13 +6,15 @@ const logger = require('../logger');
 const { cache } = require('../redis');
 const tavily = require('./tavily');
 const deepseek = require('./deepseek');
+const providerOrder = require('../settings/providerOrder');
 
-// Who answers the web lookup: config.enrich.provider, read per call like the
-// keys it depends on. Both take (query, { item, storeName }); Tavily needs only
-// the query.
-function lookupProvider() {
-  return config.enrich.provider === 'deepseek' ? { id: 'deepseek', searchItem: deepseek.searchItem }
-                                               : { id: 'tavily', searchItem: tavily.searchItem };
+// Who answers the web lookup: the ENRICH_PROVIDER order (or the one saved in
+// Settings), walked per call like the keys it depends on -- the usable ones,
+// first first (src/settings/providerOrder.js). Both take (query, { item,
+// storeName }); Tavily needs only the query.
+const SEARCH = { tavily: tavily.searchItem, deepseek: deepseek.searchItem };
+function lookupChain() {
+  return providerOrder.usable('enrich').filter((id) => SEARCH[id]);
 }
 
 // The enrichment cache is scoped PER TENANT: item enrichment is derived from a
@@ -122,9 +124,16 @@ async function enrichItems(items, storeName, { tenantId, source } = {}) {
   const stats = { enriched: 0, skipped: 0, errors: 0, fromRetailer: 0 };
   const retailerFirst = source === 'retailer';
 
-  const provider = lookupProvider();
-  if (!config.enrich.enabled && !retailerFirst) {
-    logger.info({ provider: provider.id }, 'enrichment disabled (no key for the lookup provider); skipping');
+  // ONE CHAIN PER RECEIPT, shared by every line: a provider that refuses its key
+  // on one line is dropped for the rest, so a revoked key costs one refusal and
+  // not forty.
+  const chain = lookupChain();
+  const searching = config.enrich.enabled && chain.length > 0;
+  if (!searching && !retailerFirst) {
+    logger.info(
+      { enabled: config.enrich.enabled, order: config.enrich.providers, skipped: providerOrder.pick('enrich').skipped },
+      'enrichment: no lookup provider can run; skipping'
+    );
     stats.skipped = items.length;
     return stats;
   }
@@ -151,7 +160,7 @@ async function enrichItems(items, storeName, { tenantId, source } = {}) {
 
     // Everything else is the web search, including every line of a retailer
     // receipt the retailer published no page for.
-    if (!config.enrich.enabled) {
+    if (!searching) {
       stats.skipped += 1;
       continue;
     }
@@ -169,15 +178,31 @@ async function enrichItems(items, storeName, { tenantId, source } = {}) {
   // bought twice) would both miss the cache at the same moment and both be paid
   // for; the second waits on the first instead.
   const inFlight = new Map();
+  const refusedNow = [];
   const lookupOnce = (query, item) => {
     if (!inFlight.has(query)) {
       inFlight.set(query, (async () => {
-        let result = await fromCache(query, tenantId, provider.id);
-        if (!result) {
-          result = await provider.searchItem(query, { item, storeName });
-          if (result) await toCache(query, result, tenantId, provider.id);
+        while (chain.length) {
+          const id = chain[0];
+          let result = await fromCache(query, tenantId, id);
+          if (result) return result;
+          try {
+            result = await SEARCH[id](query, { item, storeName });
+          } catch (err) {
+            // A refusal is about the KEY: drop the provider and ask the next
+            // one the same question. Anything else fails this line only.
+            if (!providerOrder.refused(id)) throw err;
+            if (chain[0] === id) {
+              chain.shift();
+              refusedNow.push(providerOrder.refusal(id));
+              logger.warn({ provider: id, next: chain[0] || null }, 'enrichment: provider refused its key; trying the next');
+            }
+            continue;
+          }
+          if (result) await toCache(query, result, tenantId, id);
+          return result;
         }
-        return result;
+        throw new Error(`no enrichment provider accepted its key: ${providerOrder.explain(refusedNow)}`);
       })());
     }
     return inFlight.get(query);
@@ -192,7 +217,7 @@ async function enrichItems(items, storeName, { tenantId, source } = {}) {
       if (result) stats.enriched += 1;
       else stats.skipped += 1;
     } catch (err) {
-      logger.warn({ err: err.message, query, provider: provider.id }, 'enrichment lookup failed');
+      logger.warn({ err: err.message, query, provider: chain[0] || null }, 'enrichment lookup failed');
       item.enrichment = { query, error: err.message };
       stats.errors += 1;
     }

@@ -39,6 +39,26 @@ async function dispatch(job) {
   }
 }
 
+/**
+ * Mark the durable record failed when a processing job will not run again: on
+ * its final attempt, or on ANY attempt when it failed unrecoverably (BullMQ
+ * does not retry an UnrecoverableError, so waiting for the last attempt would
+ * leave the receipt in "processing" forever). An applyProfile failure leaves
+ * the receipt record untouched.
+ */
+async function markFailedIfFinal(job, err) {
+  if (!job || job.name !== 'process-receipt') return false;
+  const unrecoverable = !!err && err.name === 'UnrecoverableError';
+  if (!unrecoverable && job.attemptsMade < (job.opts.attempts || config.jobAttempts)) return false;
+  try {
+    await store.update(job.data.receiptId, { status: 'failed', error: err.message });
+    return true;
+  } catch (e) {
+    logger.error({ err: e.message }, 'could not mark receipt failed');
+    return false;
+  }
+}
+
 // Build a BullMQ Worker for one tenant's queue. Each tenant has its own queue
 // (receipts:<tenant>) so a tenant's jobs are isolated; the dispatcher is shared
 // (receiptIds are composite, so the services resolve scope from the id itself).
@@ -58,15 +78,7 @@ function makeTenantWorker(tenantId) {
       { tenantId, jobId: job?.id, name: job?.name, receiptId: job?.data?.receiptId, attempt: job?.attemptsMade, err: err.message },
       'job failed'
     );
-    // On the final attempt of a processing job, mark the durable record failed.
-    // (An applyProfile failure leaves the receipt record untouched.)
-    if (job && job.name === 'process-receipt' && job.attemptsMade >= (job.opts.attempts || config.jobAttempts)) {
-      try {
-        await store.update(job.data.receiptId, { status: 'failed', error: err.message });
-      } catch (e) {
-        logger.error({ err: e.message }, 'could not mark receipt failed');
-      }
-    }
+    await markFailedIfFinal(job, err);
   });
 
   logger.info({ tenantId, queue: queueNameFor(tenantId), concurrency: config.queueConcurrency }, 'tenant worker started');
@@ -117,4 +129,4 @@ function start() {
 
 if (require.main === module) start();
 
-module.exports = { dispatch, start };
+module.exports = { dispatch, markFailedIfFinal, start };

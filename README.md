@@ -162,6 +162,13 @@ applied (discounts folded into their line items). Run `receipts list` or visit
 | both                              | ✅ vision model    | ✅ images/metadata |
 | `DEEPSEEK_API_KEY` + `VISION_PROVIDER=deepseek` + `ENRICH_PROVIDER=deepseek` | ✅ vision model | ✅ names/pages/emoji (no images) |
 
+`VISION_PROVIDER`, `ENRICH_PROVIDER` and `PRODUCT_RESOLVER` each take an
+**ordered list**, e.g. `VISION_PROVIDER=anthropic,deepseek`. Each job goes to the
+first provider in its list that has a key and has not refused it. That is
+decided every time the job runs, and a provider that refuses its key mid-call
+hands the job to the next one. The order can also be changed in Settings →
+Providers, which wins over `.env`. See [docs/SETTINGS.md § 14](docs/SETTINGS.md).
+
 For real receipts, a **vision model is strongly recommended** — raw Tesseract on
 a crumpled phone photo is hit-or-miss, while a vision model reads the layout and
 returns clean items. The default vision model is `claude-sonnet-4-6`; override
@@ -172,6 +179,10 @@ or `VISION_PROVIDER=deepseek` with `DEEPSEEK_API_KEY` (`deepseek-flash`).
 > (`tessdata/eng.traineddata`), so it runs fully offline — no CDN download. It
 > can't read HEIC (convert iPhone photos to JPEG/PNG) and needs an upright,
 > reasonably sharp image — a sideways photo reads as noise.
+> Without `tessdata/eng.traineddata` a photo fails at once, on its first attempt
+> and without retries, with a message naming the missing file. Before, it hung
+> for `TESSERACT_TIMEOUT_MS` three times over. A missing `osd.traineddata` only
+> skips orientation detection.
 
 ---
 
@@ -334,7 +345,7 @@ All via `.env` (see `.env.example`). Highlights:
 | `OCR_PADDLE_URL`     | `http://ocr-paddle:8090` | base URL of the PP-OCRv6 sidecar (used only when `OCR_PROVIDER=paddle`) |
 | `OCR_PADDLE_VL_URL`  | `http://ocr-paddle-vl:8090` | base URL of the PaddleOCR-VL sidecar (used only when `OCR_PROVIDER=paddle-vl`) |
 | `OCR_REST_TIMEOUT_MS`| `600000`                 | per-request timeout (ms) for a REST OCR sidecar (PaddleOCR-VL is slow) |
-| `VISION_PROVIDER`    | `anthropic`              | `anthropic` \| `openai` \| `deepseek`         |
+| `VISION_PROVIDER`    | `anthropic`              | ordered list of `anthropic` \| `openai` \| `deepseek`, e.g. `anthropic,deepseek`: the first with a working key reads |
 | `ANTHROPIC_API_KEY`  | —                        | enables vision extraction                    |
 | `ANTHROPIC_MODEL`    | `claude-sonnet-4-6`      | any vision-capable Claude model              |
 | `OPENAI_API_KEY`     | —                        | alternative vision provider                  |
@@ -344,7 +355,7 @@ All via `.env` (see `.env.example`). Highlights:
 | `DEEPSEEK_THINKING`  | `false`                  | let DeepSeek think before reading a photo (slower, more tokens) |
 | `TAVILY_API_KEY`     | —                        | enables item image/metadata enrichment       |
 | `ENRICH_MAX_ITEMS`   | `40`                     | cap enrichment lookups per receipt           |
-| `ENRICH_PROVIDER`    | `tavily`                 | per-item lookup: `tavily` (picture + page) \| `deepseek` (DeepSeek web search: name, grounded page, sentence, emoji — no picture) |
+| `ENRICH_PROVIDER`    | `tavily`                 | ordered list for the per-item lookup: `tavily` (picture + page) \| `deepseek` (DeepSeek web search: name, grounded page, sentence, emoji — no picture); the first with a working key looks up |
 | `ENRICH_CONCURRENCY` | `5`                      | enrichment lookups run in parallel per receipt |
 | `ENRICH_DEEPSEEK_MODEL` | `deepseek-flash`      | model the deepseek enrichment calls          |
 | `ENRICH_DEEPSEEK_MAX_SEARCHES` | `2`            | web searches allowed per line (each is billed as model tokens) |
@@ -354,7 +365,7 @@ All via `.env` (see `.env.example`). Highlights:
 | `SQLITE_PATH`        | `<DATA_DIR>/receipt-enricher.db` | SQLite database file (only when `PERSISTENCE=sqlite`) |
 | `DEFAULT_PROFILE_ID` | —                        | receipt profile (id or name) applied to uploads that omit one |
 | `PRODUCTS_ENABLED`   | `true`                   | master switch for the product-resolution stage |
-| `PRODUCT_RESOLVER`   | `anthropic`              | backend resolver/adapter: `anthropic` \| `deepseek` (`tavily` is a future drop-in) |
+| `PRODUCT_RESOLVER`   | `anthropic`              | ordered list of resolvers: `anthropic` \| `deepseek` (`tavily` is a future drop-in); the first with a working key names products |
 | `PRODUCT_ANTHROPIC_MODEL` | `claude-haiku-4-5`  | model the anthropic resolver calls (set `claude-sonnet-4-6` if Haiku can't use web tools) |
 | `PRODUCT_ANTHROPIC_WEB_SEARCH` | `true`         | ground `productUrl` via Anthropic's server-side web search |
 | `PRODUCT_DEEPSEEK_MODEL` | `deepseek-flash`     | model the deepseek resolver calls |
@@ -368,6 +379,7 @@ All via `.env` (see `.env.example`). Highlights:
 | `PRODUCT_EVENTS_MAX` | `500`                    | size of the per-lookup event buffer behind `/products/monitor` (0 disables) |
 | `PRODUCT_RESOLVE_ON_UPLOAD` | `true`            | resolve products on upload whenever a profile is applied (opt out per-upload with `resolveProducts=0`) |
 | `PRODUCT_EMOJI_ENABLED` | `true`                | map each product to a meaningful emoji (e.g. 🥚 for eggs) in the same lookup, shown in the product view's image placeholder; `0` disables it |
+| `PRODUCT_CATEGORIZE`    | `true`                | give every line with no category one: the books' category for the same product, else one batched call to the resolver's model (no web search). Fills the Products category list for synced receipts; `0` disables it. See docs/CATALOGUE.md |
 | `TELEGRAM_BOT_TOKEN` | —                        | enables the bot service                      |
 
 Inside compose, `REDIS_URL` and `DATA_DIR` are set for you. The compose file also

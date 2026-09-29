@@ -55,11 +55,14 @@ function createApp() {
       persistence: config.persistence.backend,
       blobs: config.blobs.backend,
       ocrProvider: config.ocrProvider,
-      // Which model reads a photo when ocrProvider is 'vision'.
+      // Which model reads a photo when ocrProvider is 'vision': the first in
+      // the VISION_PROVIDER order with a working key, as of this request.
       visionProvider: config.vision.provider,
+      visionProviders: config.vision.providers,
       enrichment: config.enrich.enabled ? 'enabled' : 'disabled',
-      // Who does the enrichment lookup: tavily | deepseek.
+      // Who does the enrichment lookup (tavily | deepseek), and the order tried.
       enrichmentProvider: config.enrich.provider,
+      enrichmentProviders: config.enrich.providers,
       tenants: tenantCount,
       defaultTenant: config.defaultTenantId || null,
       receiptProfiles: receiptProfileCount,
@@ -67,6 +70,7 @@ function createApp() {
       products: {
         enabled: config.products.enabled,
         resolver: config.products.resolver,
+        resolvers: config.products.resolvers,
         emoji: config.products.emoji,
       },
       time: new Date().toISOString(),

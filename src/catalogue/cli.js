@@ -6,6 +6,7 @@
 //
 //   node src/catalogue/cli.js backfill [--tenant T --user U] [--json]
 //   node src/catalogue/cli.js verify   [--tenant T --user U] [--json]
+//   node src/catalogue/cli.js categorize [--tenant T --user U] [--dry-run] [--redo] [--json]
 //
 // BACKFILL rebuilds every member's catalogue from their receipts: the receipts
 // already in the books when this feature shipped have no purchase rows, and
@@ -25,16 +26,28 @@
 //   podman exec receipt-enricher_api_1 node src/catalogue/cli.js backfill
 //   podman exec receipt-enricher_api_1 node src/catalogue/cli.js verify
 //
+// CATEGORIZE gives every line with no category one: the category the books
+// already give the same product, else the line's name read by the resolver's
+// model, a few batched calls for a whole history (src/catalogue/categorize.js).
+// Receipts synced from a retailer never meet the web-search resolver, so this
+// is what puts them in the Products screen's category list. It re-derives the
+// rows of every receipt it writes and then runs the verifier, like a backfill.
+// Running it again asks nothing and writes nothing. --dry-run asks the model
+// and prints what it would write, writing nothing. --redo asks again about
+// lines this step categorized before -- never a member's, never a resolver's.
+//
 // With no --tenant/--user it runs over every (tenant, user) that holds
 // receipts. See docs/CATALOGUE.md.
 
 const catalogue = require('./index');
 
 function args(argv) {
-  const out = { cmd: argv[0], json: false, tenant: null, user: null };
+  const out = { cmd: argv[0], json: false, dryRun: false, redo: false, tenant: null, user: null };
   for (let i = 1; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--json') out.json = true;
+    else if (a === '--dry-run') out.dryRun = true;
+    else if (a === '--redo') out.redo = true;
     else if (a === '--tenant') out.tenant = argv[++i];
     else if (a === '--user') out.user = argv[++i];
     else throw new Error(`unknown argument "${a}"`);
@@ -43,7 +56,7 @@ function args(argv) {
 }
 
 function usage() {
-  return 'usage: node src/catalogue/cli.js backfill|verify [--tenant T --user U] [--json]';
+  return 'usage: node src/catalogue/cli.js backfill|verify|categorize [--tenant T --user U] [--dry-run] [--redo] [--json]';
 }
 
 async function targets(opts) {
@@ -60,7 +73,7 @@ function line(scope) {
 
 async function main(argv) {
   const opts = args(argv);
-  if (opts.cmd !== 'backfill' && opts.cmd !== 'verify') {
+  if (!['backfill', 'verify', 'categorize'].includes(opts.cmd)) {
     console.error(usage());
     return 2;
   }
@@ -69,7 +82,26 @@ async function main(argv) {
   let failed = 0;
 
   for (const scope of scopes) {
-    if (opts.cmd === 'backfill') {
+    if (opts.cmd === 'categorize') {
+      const t0 = Date.now();
+      const done = await catalogue.categorizeHistory(scope, { dryRun: opts.dryRun, redo: opts.redo });
+      // Written rows are re-derived as each receipt is saved; the verifier is
+      // what says they were, as after a backfill.
+      const checked = opts.dryRun ? null : await catalogue.verify(scope);
+      if (checked && !checked.ok) failed += 1;
+      reports.push({ ...done, ms: Date.now() - t0, verified: checked ? checked.ok : null });
+      if (!opts.json) {
+        console.log(
+          `${line(scope)}  ${opts.dryRun ? 'DRY RUN  ' : ''}receipts ${done.receipts}  products ${done.products}  ` +
+            `lines ${done.lines}  from books ${done.byRecibbi}  from ${done.model || 'no model'} ${done.byModel}  ` +
+            `unanswered ${done.unanswered}  receipts written ${done.written}  ${Date.now() - t0}ms` +
+            (checked ? (checked.ok ? '  verified' : '  VERIFY FAILED') : '')
+        );
+        for (const [c, n] of Object.entries(done.categories).sort((a, b) => b[1] - a[1])) {
+          console.log(`  ${String(n).padStart(4)}  ${c}`);
+        }
+      }
+    } else if (opts.cmd === 'backfill') {
       const t0 = Date.now();
       const built = await catalogue.rebuild(scope);
       // A backfill is only finished when the verifier agrees with it. Checking
