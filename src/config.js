@@ -3,6 +3,7 @@
 require('dotenv').config();
 
 const path = require('path');
+const trashSchedule = require('./trash/schedule');
 
 function bool(value, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -119,6 +120,16 @@ const config = {
     // outside the system, and one that never expires is one nobody remembers
     // to revoke. 0 disables expiry (the row then lives until it is revoked).
     ttlDays: int(process.env.SHARE_TTL_DAYS, 30),
+  },
+
+  // The trash (src/trash). Deleting a receipt moves it out of the books for
+  // TRASH_RETENTION, and the sweep scheduled by TRASH_EMPTY_CRON purges the
+  // ones whose time is up. Both are checked HERE, at boot, and a value that
+  // does not read is a startup failure rather than a silent thirty days --
+  // see src/trash/schedule.js for the grammar and why.
+  trash: {
+    retentionMs: trashSchedule.parseRetention(process.env.TRASH_RETENTION),
+    cron: trashSchedule.parseCron(process.env.TRASH_EMPTY_CRON),
   },
 
   // retailer's own order API (see docs/RETAILER-INGEST.md). These skip OCR

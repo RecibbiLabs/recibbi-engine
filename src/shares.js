@@ -194,8 +194,27 @@ async function forReceipt(receiptId) {
   return publicShare(row);
 }
 
+/**
+ * Revoke whatever link a receipt has, live or lapsed -- for the purge, which
+ * has only the receipt id. A share row left behind a purged receipt is a grant
+ * pointing at nothing, and resolveShared() in src/routes/shares.js logs every
+ * one it meets as "a delete path skipped the share table".
+ */
+async function revokeReceipt(receiptId) {
+  const idx = indexKey(receiptId);
+  if (!idx) return false;
+  const entry = await persistence.get(idx);
+  if (!entry || !entry.token) return false;
+  const gone = await revoke(entry.token);
+  // revoke() drops the index only when it still names this token; a vanished
+  // share row leaves it, so drop it here either way.
+  await persistence.delete(idx);
+  return gone;
+}
+
 module.exports = {
   mint,
+  revokeReceipt,
   resolve,
   revoke,
   forReceipt,

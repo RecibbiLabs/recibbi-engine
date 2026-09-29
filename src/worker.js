@@ -105,6 +105,7 @@ function start() {
   }
 
   let timer = null;
+  let sweeper = null;
   (async () => {
     await tenants.hydrate(); // repopulate the Redis SET from the durable list
     await tenants.ensureDefault(); // the default tenant always has a queue
@@ -113,12 +114,24 @@ function start() {
     timer.unref();
   })();
 
+  // Emptying the trash on TRASH_EMPTY_CRON (src/trash/sweeper.js). Its own
+  // queue and its own failure: a sweep that cannot start is logged, and the
+  // receipt workers above carry on.
+  require('./trash/sweeper')
+    .start()
+    .then((s) => {
+      sweeper = s;
+    })
+    .catch((err) => logger.error({ err: err.message }, 'trash sweep not scheduled'));
+
   logger.info({ ocr: config.ocrProvider, watchMs }, 'worker started (per-tenant queues)');
 
   function shutdown(sig) {
     logger.info({ sig }, 'shutting down worker');
     if (timer) clearInterval(timer);
-    Promise.all([...workers.values()].map((w) => w.close())).then(() => process.exit(0));
+    const closing = [...workers.values()].map((w) => w.close());
+    if (sweeper && sweeper.worker) closing.push(sweeper.worker.close());
+    Promise.all(closing).then(() => process.exit(0));
     setTimeout(() => process.exit(0), 8000).unref();
   }
   process.on('SIGTERM', () => shutdown('SIGTERM'));

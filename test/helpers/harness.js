@@ -18,6 +18,11 @@ const path = require('path');
 for (const v of ['VISION_PROVIDER', 'ENRICH_PROVIDER', 'PRODUCT_RESOLVER']) {
   if (process.env[v] === undefined) process.env[v] = '';
 }
+// The same for the trash: a host testing the sweep with TRASH_RETENTION=5s
+// must not hand the suite five seconds where it expects the thirty-day default.
+for (const v of ['TRASH_RETENTION', 'TRASH_EMPTY_CRON']) {
+  if (process.env[v] === undefined) process.env[v] = '';
+}
 
 /**
  * Point DATA_DIR at a throwaway temp directory. Must be called BEFORE the

@@ -77,9 +77,16 @@ async function resolvedOf(receiptId) {
   }
 }
 
-/** The rows a receipt SHOULD have, by the projection. */
+/**
+ * The rows a receipt SHOULD have, by the projection.
+ *
+ * NONE WHILE IT IS IN THE TRASH. A deleted receipt is out of the books, so its
+ * products are out of the catalogue: indexing it on the way in removes its
+ * rows, indexing it on the way back out of the trash files them again, and
+ * verify() agrees with both because it asks this same function.
+ */
 async function expectedRows(record) {
-  if (!record || record.status !== 'done') return [];
+  if (!record || record.status !== 'done' || store.inTrash(record)) return [];
   return project.purchases(record, { resolved: await resolvedOf(record.id) });
 }
 
