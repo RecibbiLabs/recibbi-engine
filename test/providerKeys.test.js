@@ -309,10 +309,14 @@ test('the vision call records its answer against the key it used', async () => {
   const record = { id: 'main:main:v1', image: { file: 'x.jpg', mimeType: 'image/jpeg' } };
   fs.mkdirSync(require('path').dirname(store.imagePathFor(record)), { recursive: true });
   fs.writeFileSync(store.imagePathFor(record), Buffer.alloc(8));
-  await assert.rejects(
-    vision.extract(record),
-    /Anthropic API 401/
-  );
+  // Anthropic is the only reader in the order, so its refusal ends the read --
+  // unrecoverably, naming the refusal, rather than as a raw 401 the queue
+  // would retry three times.
+  await assert.rejects(vision.extract(record), (err) => {
+    assert.equal(err.name, 'UnrecoverableError');
+    assert.match(err.message, /anthropic \(refused: 401\)/);
+    return true;
+  });
   const rec = keys.view('anthropic');
   assert.equal(rec.check.ok, false);
   assert.equal(rec.check.status, 401);

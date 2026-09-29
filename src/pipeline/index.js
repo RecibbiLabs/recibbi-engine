@@ -7,6 +7,7 @@ const parser = require('../parse/receiptParser');
 const retailerIngest = require('../retailers/ingestService');
 const { enrichItems } = require('../enrich');
 const identity = require('../identity');
+const catalogue = require('../catalogue');
 const logger = require('../logger');
 
 function money(n) {
@@ -38,14 +39,15 @@ function buildSummary(record) {
  * vision model's structured output) into the canonical shape.
  */
 async function extractFromImage(record) {
-  const { rawText, structured, provider } = await ocr.extract(record);
+  const { rawText, structured, provider, reader } = await ocr.extract(record);
   const parsed = structured
     ? parser.normalizeStructured(structured, rawText)
     : parser.parseText(rawText);
-  return {
-    parsed,
-    extraction: { provider, rawText: rawText ? rawText.slice(0, 20000) : null },
-  };
+  const extraction = { provider, rawText: rawText ? rawText.slice(0, 20000) : null };
+  // Which model read it, when a vision reader did: the order can put a
+  // different one first from one receipt to the next.
+  if (reader) extraction.reader = reader;
+  return { parsed, extraction };
 }
 
 /**
@@ -147,12 +149,32 @@ async function processReceipt(receiptId) {
 
   // 4. Summarize and finalize
   const finalRecord = await store.get(receiptId);
+  // Every line with no category gets one -- the one the member's books already
+  // give the same product, else one batched model call -- so the receipt's
+  // products arrive in the Products screen's category list with it. Before the
+  // remembered names, so a category the member gave a product is the one that
+  // stands. Never throws. See src/catalogue/categorize.js.
+  const categorized = await catalogue.categorizeReceipt(finalRecord);
+  if (categorized) logger.info({ id: receiptId, lines: categorized }, 'categorized lines that had no category');
+  // A product the member has named before is named the same way here, before
+  // the receipt is done -- so the receipt page and the Products card both say
+  // what the member said, from the first look. Never throws.
+  const remembered = await catalogue.applyRememberedNames(finalRecord);
+  if (remembered) logger.info({ id: receiptId, lines: remembered }, 'applied names the member gave these products before');
   finalRecord.summary = buildSummary(finalRecord);
   finalRecord.status = 'done';
   finalRecord.timings = { ...finalRecord.timings, totalMs: Date.now() - t0 };
   await store.save(finalRecord);
 
-  // 5. Drop the raw payload if this deployment keeps only the normalized record.
+  // 5. File its products in the member's catalogue: one purchase row per
+  // product on this receipt. AFTER the receipt is done and saved -- the rows are
+  // a projection of the record, so the record has to be final first -- and
+  // best-effort: a receipt that read perfectly is not failed because its
+  // products could not be filed. A miss is drift that `scripts/catalogue.js
+  // verify` names and `backfill` repairs. See docs/CATALOGUE.md.
+  await catalogue.indexReceiptSafely(finalRecord);
+
+  // 6. Drop the raw payload if this deployment keeps only the normalized record.
   if (isDocument && !config.retailers.storeRawPayload) {
     return store.discardDocument(receiptId);
   }

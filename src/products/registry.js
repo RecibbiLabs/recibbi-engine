@@ -56,7 +56,12 @@ function get(id) {
   return registry().get(id) || null;
 }
 
-/** The resolver selected by config.products.resolver, or null if absent. */
+/**
+ * The resolver that would name a product NOW: config.products.resolver, which
+ * is the first in the PRODUCT_RESOLVER order with a working key -- or the first
+ * in the order when none has one (src/settings/providerOrder.js). Null when it
+ * names no resolver this engine ships.
+ */
 function active() {
   return get(config.products.resolver);
 }

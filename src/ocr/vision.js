@@ -4,7 +4,9 @@ const fsp = require('fs/promises');
 const config = require('../config');
 const logger = require('../logger');
 const { imagePathFor } = require('../store');
+const { UnrecoverableError } = require('bullmq');
 const providerKeys = require('../settings/providerKeys');
+const providerOrder = require('../settings/providerOrder');
 
 const EXTRACTION_PROMPT = `You are a precise receipt transcriber. You are given a photo of a grocery store receipt.
 Transcribe the contents and respond with ONLY a JSON object (no markdown, no commentary) of this exact shape:
@@ -176,26 +178,57 @@ async function extractWithDeepSeek(base64, mimeType) {
   return text;
 }
 
+const READERS = {
+  anthropic: extractWithAnthropic,
+  openai: extractWithOpenAI,
+  deepseek: extractWithDeepSeek,
+};
+
 /**
- * @returns {Promise<{ rawText: string|null, structured: object|null }>}
+ * Read a photo with the FIRST USABLE READER in the VISION_PROVIDER order
+ * (src/settings/providerOrder.js): one with a key its provider has not refused.
+ *
+ * A reader that REFUSES its key during this call -- nothing had called it
+ * since the key changed, or the key was revoked in the provider's dashboard --
+ * is recorded as refused (providerKeys.observe(), inside each call) and the
+ * next usable reader reads the same photo. Any other failure (a 429, a 500, an
+ * answer that is not JSON) is the provider's afternoon, not its key: it fails
+ * this attempt and the queue retries, as it always did.
+ *
+ * NOBODY CAN READ is UNRECOVERABLE, and says why, reader by reader: retrying a
+ * missing key three times is six minutes of "processing" for nothing.
+ *
+ * @returns {Promise<{ rawText: string|null, structured: object|null, reader: string }>}
  */
 async function extract(record) {
-  const provider = config.vision.provider;
+  const pick = providerOrder.pick('vision');
+  if (!pick.chosen) throw new UnrecoverableError(`vision OCR cannot run: ${providerOrder.nobody('vision', pick)}`);
+
   const buf = await fsp.readFile(imagePathFor(record));
   const base64 = bufferToBase64(buf);
   let mimeType = record.image.mimeType;
   if (!/^image\//.test(mimeType)) mimeType = 'image/jpeg';
 
-  let text;
-  if (provider === 'openai') {
-    text = await extractWithOpenAI(base64, mimeType);
-  } else if (provider === 'deepseek') {
-    text = await extractWithDeepSeek(base64, mimeType);
-  } else {
-    text = await extractWithAnthropic(base64, mimeType);
+  const refusedNow = [];
+  for (const id of pick.usable) {
+    const read = READERS[id];
+    if (!read) continue;
+    try {
+      const text = await read(base64, mimeType);
+      if (refusedNow.length) {
+        logger.warn({ id: record.id, reader: id, refused: refusedNow.map((r) => r.id) }, 'vision: read by a later reader after a refusal');
+      }
+      return { rawText: text, structured: safeJson(text), reader: id };
+    } catch (err) {
+      if (!providerOrder.refused(id)) throw err;
+      refusedNow.push(providerOrder.refusal(id));
+      logger.warn({ id: record.id, reader: id, err: err.message }, 'vision: reader refused its key; trying the next');
+    }
   }
-  const structured = safeJson(text);
-  return { rawText: text, structured };
+  throw new UnrecoverableError(
+    `vision OCR cannot run: ${providerOrder.explain([...pick.skipped, ...refusedNow])} -- ` +
+      'every reader in the order is missing a key or refused it.'
+  );
 }
 
 module.exports = { extract };

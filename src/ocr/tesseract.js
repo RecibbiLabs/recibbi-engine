@@ -1,6 +1,8 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
+const { UnrecoverableError } = require('bullmq');
 const { createWorker } = require('tesseract.js');
 const config = require('../config');
 const logger = require('./../logger');
@@ -32,7 +34,23 @@ async function extract(record) {
   try {
     fs.mkdirSync(tessdataDir, { recursive: true });
   } catch {
-    /* non-fatal: tesseract will just fall back to the CDN */
+    /* non-fatal: the check below names the missing file */
+  }
+
+  // FAIL FAST WHEN THE LANGUAGE DATA IS NOT THERE. tesseract.js does not reject
+  // on a missing traineddata: with an errorHandler set, the load failure leaves
+  // its startup promise unsettled, so the call sat out the whole
+  // TESSERACT_TIMEOUT_MS and then the queue retried it -- three attempts, about
+  // six minutes of "processing" -- for a file that was never going to appear.
+  // It is a deployment fault, not a transient one, so it is UNRECOVERABLE: the
+  // queue fails the job on this attempt and src/worker.js marks the receipt
+  // failed with this message, which says what to do about it.
+  if (!hasData(tessdataDir, 'eng')) {
+    throw new UnrecoverableError(
+      `tesseract OCR cannot run: ${path.join(tessdataDir, 'eng.traineddata')} is missing. ` +
+        'Fetch it with scripts/fetch-tessdata.sh and rebuild, or give the engine a vision model key (VISION_PROVIDER).' +
+        visionWhy()
+    );
   }
 
   // Without an errorHandler, tesseract.js does `throw Error(...)` inside its
@@ -67,7 +85,12 @@ async function extract(record) {
  */
 async function runOcr(record, imgPath, workerOpts) {
   let rotateRadians = 0;
-  if (config.tesseractOsd) {
+  // OSD is optional: without osd.traineddata the worker would hang exactly as
+  // above, so it is skipped rather than attempted, and recognition falls back
+  // to skew-only auto-rotation.
+  if (config.tesseractOsd && !hasData(config.tessdataDir, 'osd')) {
+    logger.info({ id: record.id }, 'tesseract: no osd.traineddata -- skipping orientation detection');
+  } else if (config.tesseractOsd) {
     const orient = await detectOrientation(record, imgPath, workerOpts);
     if (orient && orient.degrees && orient.confidence >= config.tesseractOsdMinConfidence) {
       rotateRadians = (orient.degrees * Math.PI) / 180;
@@ -116,6 +139,30 @@ async function detectOrientation(record, imgPath, workerOpts) {
     return null;
   } finally {
     if (worker) await worker.terminate();
+  }
+}
+
+/**
+ * Why no vision reader took this photo instead, when that is why Tesseract has
+ * it (OCR_PROVIDER=auto found none usable). The two failures are one story, and
+ * an operator reading only the first half would go looking for tessdata.
+ */
+function visionWhy() {
+  try {
+    const providerOrder = require('../settings/providerOrder');
+    const p = providerOrder.pick('vision');
+    return p.chosen ? '' : ` (No vision reader could take it: ${providerOrder.explain(p.skipped)}.)`;
+  } catch {
+    return '';
+  }
+}
+
+/** Is `<lang>.traineddata` in the tessdata dir, uncompressed and non-empty (gzip:false above)? */
+function hasData(dir, lang) {
+  try {
+    return fs.statSync(path.join(dir, `${lang}.traineddata`)).size > 0;
+  } catch {
+    return false;
   }
 }
 

@@ -520,3 +520,121 @@ curl -s -X PUT localhost:8080/api/settings/providers/anthropic \
 # Remove what was saved here. .env answers again, or nothing does.
 curl -s -X DELETE localhost:8080/api/settings/providers/anthropic
 ```
+
+## 14. Who does each job: an ordered list of providers
+
+Three jobs call an outside model, and each used to name exactly **one**
+provider in `.env`:
+
+| job | what it does | variable | can be done by | default |
+|---|---|---|---|---|
+| `vision` | reads a photographed receipt | `VISION_PROVIDER` | `anthropic`, `openai`, `deepseek` | `anthropic` |
+| `enrich` | the web lookup behind each line | `ENRICH_PROVIDER` | `tavily`, `deepseek` | `tavily` |
+| `products` | names a line as a product (resolver) | `PRODUCT_RESOLVER` | `anthropic`, `deepseek` | `anthropic` |
+
+One name was one way to fail silently. `VISION_PROVIDER=anthropic` with no
+Anthropic key and a DeepSeek key saved in Settings read every photo with
+Tesseract, or with nothing where Tesseract has no language data. A working
+reader was one setting away, and nothing said so.
+
+So each variable is now an **ordered list**, and a single name is a list of one:
+
+```bash
+VISION_PROVIDER=anthropic,deepseek
+ENRICH_PROVIDER=tavily,deepseek
+PRODUCT_RESOLVER=anthropic,deepseek
+```
+
+The list is lower-cased and trimmed, and each name appears once. A name that
+cannot do the job is dropped, with one warning in the log. A list with nothing
+left is the default.
+
+### The first usable provider, decided when the job runs
+
+The job goes to the **first provider in the list that is usable now**:
+
+- **it has a key**: saved in Settings → Providers, else in `.env`, read per call (§ 13);
+- **and the provider has not refused that key**: the last answer recorded for
+  exactly this key, by the probe on save or by `observe()` on a real call, is
+  not a 401/403.
+
+Nothing is decided at boot. A key saved at noon, or a key refused at noon,
+changes who does the 12:01 job in the worker and the bot as much as in the api.
+`src/settings/providerOrder.js` holds the rule. `config.vision.provider`,
+`config.enrich.provider` and `config.products.resolver` are getters over it
+that return who would do the job now. `.providers` / `.resolvers` return the
+whole list.
+
+### A refusal during the call falls through
+
+A key can be missing a check (nothing has called it since it changed), or it can
+be revoked in the provider's dashboard after its last good answer. So the call
+sites do not trust the check alone:
+
+- **vision** (`src/ocr/vision.js`) tries the usable readers in order. A reader
+  that answers 401/403 is recorded as refused, and the next one reads the same
+  photo. The record says who read it: `extraction.reader`.
+- **enrich** (`src/enrich/index.js`) keeps one chain per receipt. A provider that
+  refuses on one line is dropped for the rest, so a revoked key costs one
+  refusal, not forty.
+- **products** (`src/products/resolveService.js`) does the same per receipt, and
+  the product result's `resolver` is the one that answered.
+- **categorize** (`src/catalogue/categorize.js`) walks the `products` list, then
+  any other model with a key.
+
+Any other failure, such as a 429, a 500 or an answer that isn't JSON, is not
+about the key. It fails as it always did, and the queue retries.
+
+### When nobody can do the job, it says why
+
+| job | nobody usable |
+|---|---|
+| `vision` | under `OCR_PROVIDER=auto`, photos go to Tesseract, and a missing `eng.traineddata` names both halves of the story. Under `OCR_PROVIDER=vision`, the job fails **unrecoverably** on its first attempt with each reader's reason, e.g. `anthropic (no key), deepseek (refused: 401)`. |
+| `enrich` | no line is looked up (`config.enrich.enabled` is false unless `ENRICH_ENABLED` says otherwise). |
+| `products` | every line is skipped, and the log names each resolver's reason. |
+
+### The order can be changed from the screen
+
+Settings → Providers saves an order per job, and **a saved order wins over
+`.env`**, as a saved key does. Removing it gives `.env` back. It is not a secret,
+so it is a plain JSON file beside the keys, read with the same one-stat-per-call
+cache:
+
+```
+<dataDir>/.registry/provider-order.json   { version, jobs: { vision: { order, savedAt } } }
+```
+
+A saved list may **leave a provider out**, and a provider left out is never
+asked, even with a working key. That is how one job is kept off a provider that
+another job still uses. A list naming a provider with no key is **accepted**: the
+order is a preference, and a key added tomorrow should not need the order saved
+again. The view says which providers are blocked and why, and the job skips them.
+
+```bash
+# Every job: its order, where it came from (saved | env | default), who does it now,
+# and each candidate's state.
+curl -s localhost:8080/api/settings/provider-order
+# { "vision": { "job": "vision", "env": "VISION_PROVIDER",
+#     "order": ["anthropic", "deepseek"], "from": "env", "envOrder": ["anthropic", "deepseek"],
+#     "fallback": ["anthropic"], "candidates": ["anthropic", "openai", "deepseek"],
+#     "chosen": "deepseek",
+#     "status": { "anthropic": { "why": "no key" }, "openai": { "why": "no key" },
+#                 "deepseek": { "why": null } } }, "enrich": {...}, "products": {...} }
+
+# Save an order. 400 names what is wrong (a provider that cannot do the job, twice,
+# or an empty list); 404 for a job there is not.
+curl -s -X PUT localhost:8080/api/settings/provider-order/vision \
+  -H 'content-type: application/json' -d '{"order":["deepseek","anthropic"]}'
+
+# Back to .env.
+curl -s -X DELETE localhost:8080/api/settings/provider-order/vision
+```
+
+The same trust boundary as the keys applies: operator only, enforced by
+`recibbi-ux-main`. `/health` also reports `visionProviders`,
+`enrichmentProviders` and `products.resolvers` beside who does each job now.
+
+A test that assigns `config.vision.provider = 'deepseek'` **pins** that job's
+order for its process, as assigning the single name always did.
+`test/helpers/harness.js` sets the three variables to empty before config loads,
+so the host's `.env` never decides which provider the suite exercises.

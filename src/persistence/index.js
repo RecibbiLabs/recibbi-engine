@@ -9,6 +9,7 @@
 //
 // A document key is `{ kind, tenant, user, id, sub }`:
 //   kind   - logical collection: receipts | receiptProfiles | profileResults |
+//            purchases | purchaseIndex | catalogue (src/catalogue/) |
 //            products | tenants | shares | shareIndex
 //   tenant - tenant segment (for kind=tenants it just buckets the registry; for
 //            kind=shares it is '' — a share row is keyed by its token alone)

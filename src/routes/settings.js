@@ -31,6 +31,7 @@ const blobs = require('../blobs');
 const memberProfile = require('../settings/memberProfile');
 const retailerPrefs = require('../settings/retailerPrefs');
 const providerKeys = require('../settings/providerKeys');
+const providerOrder = require('../settings/providerOrder');
 const { SettingsError } = require('../settings/validate');
 
 const router = express.Router();
@@ -307,6 +308,49 @@ router.put('/api/settings/providers/:key', async (req, res, next) => {
 router.delete('/api/settings/providers/:key', async (req, res, next) => {
   try {
     res.json(await providerKeys.remove(req.params.key));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ----------------------------------------------------------- provider order
+
+   WHO DOES EACH JOB, in order: reading photos (vision), the web lookup behind
+   each line (enrich), and naming products (products). Each job's list comes
+   from its .env variable -- VISION_PROVIDER, ENRICH_PROVIDER, PRODUCT_RESOLVER,
+   each a comma-separated list -- unless an order is saved here, which wins, as
+   a saved key does. The job goes to the first provider in the list with a key
+   its provider has not refused, decided per call (src/settings/providerOrder.js).
+
+   The same trust boundary as the keys above: operator only, enforced by
+   recibbi-ux-main. Nothing here is secret -- an order is a list of names. */
+
+/** GET /api/settings/provider-order -- every job: its order, where it came from, and who would do it now. */
+router.get('/api/settings/provider-order', (req, res, next) => {
+  try {
+    res.json(providerOrder.viewAll());
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PUT /api/settings/provider-order/:job { order: ['deepseek', 'anthropic'] }
+ * The providers to try, in order; one left out is not tried. 400 names what is
+ * wrong with the list; 404 for a job there is not.
+ */
+router.put('/api/settings/provider-order/:job', async (req, res, next) => {
+  try {
+    res.json(await providerOrder.save(req.params.job, req.body));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** DELETE /api/settings/provider-order/:job -- the saved order goes; .env answers again. */
+router.delete('/api/settings/provider-order/:job', async (req, res, next) => {
+  try {
+    res.json(await providerOrder.remove(req.params.job));
   } catch (err) {
     next(err);
   }

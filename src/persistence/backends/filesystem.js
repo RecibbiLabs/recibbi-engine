@@ -12,6 +12,13 @@
 //   tenants          <data>/.registry/tenants/<id>.json               (global)
 //   shares           <data>/.registry/shares/<token>.json             (global)
 //   shareIndex       <data>/<tenant>/<user>/shareIndex/<id>.json
+//   purchases        <data>/<tenant>/<user>/purchases/<productId>/<receiptId>.json
+//   purchaseIndex    <data>/<tenant>/<user>/purchaseIndex/<receiptId>.json
+//   catalogue        <data>/<tenant>/<user>/catalogue/<productId>.json
+//
+// The last three are the product catalogue (src/catalogue/). `purchases` is
+// sub-keyed like `products`: one directory per product, one file per receipt
+// it was on, so listing one product is reading one directory.
 //
 // `.registry` is not a valid id segment (src/identity.js SEGMENT_RE excludes
 // `.`), so the global registry dir can never collide with a real tenant dir.
@@ -29,6 +36,11 @@ const config = require('../../config');
 const identity = require('../../identity');
 
 const REGISTRY_DIR = '.registry';
+
+// Kinds whose documents nest one level, <id>/<sub>.json. list() has to know,
+// because listing a whole scope of one of these walks a directory of
+// directories rather than reading one.
+const SUB_KEYED = new Set(['profileResults', 'products', 'purchases']);
 
 // The directory that holds a key's document file(s). Reuses the identity path
 // helpers (which validate segments — defense-in-depth against traversal).
@@ -97,7 +109,7 @@ async function readJsonDir(dir) {
 
 async function list(prefix) {
   const { kind, id } = prefix;
-  const subKeyed = kind === 'profileResults' || kind === 'products';
+  const subKeyed = SUB_KEYED.has(kind);
   if (subKeyed) {
     // One receipt's results (id given) — read its subdir directly.
     if (id) return readJsonDir(path.join(baseDirFor(prefix), id));

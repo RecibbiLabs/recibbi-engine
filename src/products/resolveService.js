@@ -17,6 +17,8 @@ const registry = require('./registry');
 const productStore = require('./productStore');
 const productCache = require('./productCache');
 const productEvents = require('./productEvents');
+const catalogue = require('../catalogue');
+const providerOrder = require('../settings/providerOrder');
 const logger = require('../logger');
 
 // Run `fn` over `arr` with at most `limit` calls in flight at once, preserving
@@ -84,10 +86,29 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
     throw new ResolveError(409, `profile "${profile.name}" has not been applied to this receipt yet`);
   }
 
-  const resolver = registry.active();
-  if (!resolver) {
-    throw new ResolveError(422, `product resolver "${config.products.resolver}" is not available`);
+  // WHO NAMES THE PRODUCTS: the PRODUCT_RESOLVER order (or the one saved in
+  // Settings), walked now -- the usable resolvers, first first. A list naming
+  // no resolver this engine ships is a 422, as a single unknown name always
+  // was; a list whose resolvers all lack a working key is the disabled path
+  // below, which skips every line and says why.
+  //
+  // Usable is the resolver module's own answer -- ready(config), which is
+  // whether its key is there -- and not refused: the provider has not turned
+  // down exactly that key (providerOrder.refused()).
+  const pick = providerOrder.pick('products');
+  const known = pick.order.map((id) => registry.get(id)).filter(Boolean);
+  if (!known.length) {
+    throw new ResolveError(422, `product resolver "${pick.order.join(',')}" is not available`);
   }
+  const chain = [];
+  const blocked = [];
+  for (const r of known) {
+    if (chain.includes(r)) continue;
+    if (!r.ready(config)) blocked.push({ id: r.id, why: 'no key' });
+    else if (providerOrder.refused(r.id)) blocked.push({ id: r.id, why: 'refused' });
+    else chain.push(r);
+  }
+  let resolver = chain[0] || known[0];
 
   const items = Array.isArray(profileResult.items) ? profileResult.items : [];
   const ctx = {
@@ -102,25 +123,30 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
   // errors still equals the item count, so existing consumers are unaffected.
   const stats = { resolved: 0, skipped: 0, cached: 0, errors: 0 };
 
-  const enabled = config.products.enabled && resolver.ready(config);
+  const enabled = config.products.enabled && chain.length > 0;
   if (!enabled) {
     logger.info(
-      { receiptId: record.id, resolver: resolver.id, enabled: config.products.enabled, ready: resolver.ready(config) },
-      'product resolution disabled or backend not configured; skipping'
+      {
+        receiptId: record.id,
+        order: pick.order,
+        enabled: config.products.enabled,
+        why: chain.length ? null : providerOrder.explain(blocked),
+      },
+      'product resolution disabled or no resolver has a working key; skipping'
     );
   }
 
   // Each resolver with a model keeps its settings under config.products.<id>.
-  const model = (config.products[resolver.id] && config.products[resolver.id].model) || null;
+  const modelOf = (r) => (config.products[r.id] && config.products[r.id].model) || null;
   const storeName = profileResult.store ? profileResult.store.name : null;
   // Emit one monitor event per lookup (best-effort; see productEvents). The
   // `dryRun` flag rides along so the console can distinguish probe runs.
-  const emit = (lineItem, key, outcome, latencyMs, extra) =>
+  const emit = (lineItem, key, outcome, latencyMs, extra, r = resolver) =>
     productEvents.record({
       receiptId: record.id,
       profileId: profile.id,
-      resolver: resolver.id,
-      model,
+      resolver: r.id,
+      model: modelOf(r),
       store: storeName,
       sku: lineItem.sku || null,
       description: lineItem.description || null,
@@ -147,25 +173,45 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
   // Resolve eligible items in a bounded parallel pool, each fronted by the
   // shared per-SKU cache. A cache hit skips the backend call; only successful
   // (non-null) fields are cached, mirroring enrich.
-  await mapWithConcurrency(toResolve, config.products.concurrency, async (slot) => {
-    const { idx, lineItem } = slot;
-    const key = productCache.keyFor(resolver.id, lineItem, ctx);
-    try {
+  // ONE CHAIN FOR THE RECEIPT: a resolver that refuses its key on one line is
+  // dropped for every line after it, and that line is asked of the next one.
+  async function resolveOne(lineItem) {
+    for (;;) {
+      const r = chain[0];
+      if (!r) throw new Error(`no resolver accepted its key: ${providerOrder.explain(blocked)}`);
+      const key = productCache.keyFor(r.id, lineItem, ctx);
       const t0 = Date.now();
       const hit = await productCache.get(key);
-      if (hit) {
-        products[idx] = { lineItem, ...hit, error: null };
+      if (hit) return { r, key, fields: hit, cached: true, latencyMs: Date.now() - t0 };
+      try {
+        const fields = await r.resolve(lineItem, ctx);
+        return { r, key, fields, cached: false, latencyMs: Date.now() - t0 };
+      } catch (err) {
+        if (!providerOrder.refused(r.id)) throw Object.assign(err, { resolverId: r.id, cacheKey: key });
+        if (chain[0] === r) {
+          chain.shift();
+          blocked.push(providerOrder.refusal(r.id));
+          logger.warn({ receiptId: record.id, resolver: r.id, next: chain[0] ? chain[0].id : null }, 'product resolver refused its key; trying the next');
+        }
+      }
+    }
+  }
+
+  await mapWithConcurrency(toResolve, config.products.concurrency, async (slot) => {
+    const { idx, lineItem } = slot;
+    try {
+      const { r, key, fields, cached, latencyMs } = await resolveOne(lineItem);
+      resolver = r;
+      if (cached) {
+        products[idx] = { lineItem, ...fields, error: null };
         stats.resolved += 1;
         stats.cached += 1;
-        await emit(lineItem, key, 'hit', Date.now() - t0, {
-          productTitle: hit.productTitle || null,
-          confidence: hit.confidence ?? null,
-        });
+        await emit(lineItem, key, 'hit', latencyMs, {
+          productTitle: fields.productTitle || null,
+          confidence: fields.confidence ?? null,
+        }, r);
         return;
       }
-      const t1 = Date.now();
-      const fields = await resolver.resolve(lineItem, ctx);
-      const latencyMs = Date.now() - t1;
       if (fields) {
         await productCache.set(key, fields);
         products[idx] = { lineItem, ...fields, error: null };
@@ -173,17 +219,18 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
         await emit(lineItem, key, 'miss', latencyMs, {
           productTitle: fields.productTitle || null,
           confidence: fields.confidence ?? null,
-        });
+        }, r);
       } else {
         products[idx] = nullProduct(lineItem);
         stats.skipped += 1;
-        await emit(lineItem, key, 'empty', latencyMs, {});
+        await emit(lineItem, key, 'empty', latencyMs, {}, r);
       }
     } catch (err) {
       logger.warn({ err: err.message, description: lineItem.description }, 'product resolution failed for item');
       products[idx] = nullProduct(lineItem, err.message);
       stats.errors += 1;
-      await emit(lineItem, key, 'error', null, { error: err.message });
+      const r = registry.get(err.resolverId) || resolver;
+      await emit(lineItem, err.cacheKey || productCache.keyFor(r.id, lineItem, ctx), 'error', null, { error: err.message }, r);
     }
   });
 
@@ -192,7 +239,7 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
     receiptProfileId: profile.id,
     receiptProfileName: profile.name,
     resolver: resolver.id,
-    model,
+    model: modelOf(resolver),
     resolvedAt: new Date().toISOString(),
     dryRun: !!dryRun,
     store: profileResult.store || { name: null, date: null },
@@ -202,6 +249,11 @@ async function resolveProductsForProfileResult(receiptId, profileId, { dryRun = 
 
   if (!dryRun) {
     await productStore.save(result);
+    // The resolver's brand, category and confidence reach the Products screen
+    // through the catalogue, so the receipt's purchase rows are re-derived now
+    // that there is something new to derive them from. Best-effort, like the
+    // pipeline's own indexing.
+    await catalogue.reindex(record.id);
     logger.info(
       { receiptId: record.id, receiptProfileId: profile.id, resolver: resolver.id, ...stats },
       'products resolved'

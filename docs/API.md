@@ -131,6 +131,11 @@ queued  ──►  processing  ──►  done
 | `GET`  | `/api/products/cache/stats` | Count of entries in the shared product cache | JSON |
 | `GET`  | `/api/products/cache/export` | Export the product cache as a portable JSON document | JSON |
 | `POST` | `/api/products/cache/import` | Import a cache export (or bare entries array); `?flush=1` clears first | JSON |
+| `GET`  | `/api/catalogue` | A page of the member's **product catalogue** — one product per store + SKU/till string across the books, filtered (`category`, `store`, `named`, `tag`, `times_min`, `times_max`), ordered (`sort`) and sliced (`limit`, `offset`) | JSON envelope |
+| `GET`  | `/api/catalogue/:id` | One product and the receipts it was on | JSON |
+| `PATCH`| `/api/catalogue/:id` | Name a product (`{ title, brand, category }`) on every receipt it was on; remembered for later receipts | JSON |
+| `GET`  | `/api/catalogue/verify` | Recompute the member's catalogue from their receipts and compare with what is stored; writes nothing | JSON report |
+| `POST` | `/api/catalogue/rebuild` | Rebuild the member's catalogue from their receipts (the backfill, per member) | JSON report |
 | `GET`  | `/products` | HTML list of all product results | HTML |
 | `GET`  | `/products/monitor` | Live, auto-refreshing technical console for lookups & cache hits (`?interval=<sec>`) | HTML |
 | `GET`  | `/observe/cache/products` | Alias for `/products/monitor` (same page; `?interval=<sec>`, trailing `s` ok) | HTML |
@@ -159,13 +164,15 @@ curl -fsS "$BASE/health" | jq .
   "persistence": "sqlite",
   "blobs": "local",
   "ocrProvider": "vision",
-  "visionProvider": "anthropic",
-  "enrichment": "disabled",
-  "enrichmentProvider": "tavily",
+  "visionProvider": "deepseek",
+  "visionProviders": ["anthropic", "deepseek"],
+  "enrichment": "enabled",
+  "enrichmentProvider": "deepseek",
+  "enrichmentProviders": ["tavily", "deepseek"],
   "tenants": 1,
   "defaultTenant": "main",
   "receiptProfiles": 1,
-  "products": { "enabled": true, "resolver": "anthropic" },
+  "products": { "enabled": true, "resolver": "deepseek", "resolvers": ["anthropic", "deepseek"] },
   "time": "2026-06-03T20:00:00.000Z"
 }
 ```
@@ -176,6 +183,12 @@ the active durable-record backend (`filesystem` \| `sqlite` \| `postgresql`), an
 reads a photo when `ocrProvider` is `vision` (`anthropic` \| `openai` \|
 `deepseek`) — see
 [SETTINGS.md § 4](SETTINGS.md#4-the-photograph-and-the-seam-under-it).
+`visionProviders`, `enrichmentProviders` and `products.resolvers` are each job's
+ordered list; `visionProvider`, `enrichmentProvider` and `products.resolver` are
+who would do the job **as of this request**: the first in the list with a key
+its provider has not refused, or the first in the list when none has one
+([SETTINGS.md § 14](SETTINGS.md)). The lists are read and changed at
+`GET|PUT|DELETE /api/settings/provider-order[/:job]`.
 
 ### Tenant accounts
 
@@ -879,6 +892,24 @@ a missing `ttlSeconds` falls back to `PRODUCT_CACHE_TTL_SECONDS`. Response:
 
 ---
 
+## Product catalogue
+
+Every product a member has bought, once each — the data behind ux-main's
+Products screen. Scoped by `X-Tenant-Id` / `X-User-Id` like `GET /api/receipts`.
+Not to be confused with `/api/products`, which is the resolver's per-receipt
+result documents. The design, the persistence model and the backfill are in
+[CATALOGUE.md](CATALOGUE.md).
+
+```bash
+curl -s 'localhost:8080/api/catalogue?category=Dairy&sort=most_spent&limit=24' \
+  -H 'X-Tenant-Id: main' -H 'X-User-Id: main' | jq '{total, matched, receipts, first: .records[0].item.description}'
+```
+
+The envelope is `{ records, total, matched, receipts, limit, offset, more,
+facets, unpictured }`. Each record is
+`{ id, key, line, store, item, buys: [{ record: {id, store, retailer}, day, item, qty, spent, lines }], times, qty, spent, last }`
+— the shape the design atlas's `pages/products.js` builders read.
+
 ## Notes
 
 - **Enrichment** (per-item lookup) only runs when the chosen provider has a key:
@@ -888,7 +919,8 @@ a missing `ttlSeconds` falls back to `PRODUCT_CACHE_TTL_SECONDS`. Response:
   `source: "deepseek"` and no `imageUrl`. Otherwise items list cleanly with no
   enrichment.
 - **Extraction quality**: a vision model (`ANTHROPIC_API_KEY` /
-  `VISION_PROVIDER=openai` / `VISION_PROVIDER=deepseek`) reads layout and returns clean items; with no key it
+  `VISION_PROVIDER=openai` / `VISION_PROVIDER=deepseek`, or a list such as
+  `VISION_PROVIDER=anthropic,deepseek`) reads layout and returns clean items; with no usable reader it
   falls back to offline Tesseract OCR (best on an upright, sharp photo).
 - **No HEIC**: convert iPhone HEIC photos to JPEG/PNG before uploading.
 - The id is the composite `"<tenant>:<user>:<cacheId>"` (the `cacheId` is a

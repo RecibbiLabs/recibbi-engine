@@ -8,6 +8,17 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// WHO DOES EACH JOB IS NOT THE HOST'S TO DECIDE HERE. src/config.js loads the
+// host's .env, and the three provider orders in it (src/settings/providerOrder.js)
+// change which resolver, reader and lookup the suite exercises -- an operator
+// setting PRODUCT_RESOLVER=deepseek turned a dozen Anthropic-shaped tests red.
+// dotenv never overrides a variable that is already set, so setting these to
+// empty BEFORE config loads leaves each job on its default; a test that wants
+// another order pins it (`config.products.resolver = 'deepseek'`).
+for (const v of ['VISION_PROVIDER', 'ENRICH_PROVIDER', 'PRODUCT_RESOLVER']) {
+  if (process.env[v] === undefined) process.env[v] = '';
+}
+
 /**
  * Point DATA_DIR at a throwaway temp directory. Must be called BEFORE the
  * first `require('../src/config')` / `require('../src/store')` in a test file,

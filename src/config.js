@@ -17,9 +17,9 @@ function int(value, fallback) {
 const dataDir = path.resolve(process.env.DATA_DIR || path.join(__dirname, '..', 'data'));
 
 // Decide which OCR/extraction provider to actually use. `auto` is resolved PER
-// CALL, at the bottom of this file: it asks whether the reader has a key, and a
-// key can now arrive from Settings -> Providers while the worker is running.
-const visionProvider = (process.env.VISION_PROVIDER || 'anthropic').toLowerCase();
+// CALL, at the bottom of this file: it asks whether any reader in the
+// VISION_PROVIDER list can read, and a key -- or a new order -- can arrive from
+// Settings -> Providers while the worker is running.
 const ocrMode = (process.env.OCR_PROVIDER || 'auto').toLowerCase();
 
 const config = {
@@ -214,7 +214,9 @@ const config = {
   },
 
   vision: {
-    provider: visionProvider, // 'anthropic' | 'openai' | 'deepseek'
+    // provider / providers: per call, from VISION_PROVIDER -- an ORDERED LIST
+    // (anthropic | openai | deepseek, comma-separated) -- or the order saved in
+    // Settings. See the bottom of this file and src/settings/providerOrder.js.
     anthropic: {
       // apiKey: read per call -- see the bottom of this file.
       model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
@@ -243,12 +245,13 @@ const config = {
   // substantiating web link) via a configurable backend *resolver* (an adapter).
   // The resolver is chosen by config — like OCR_PROVIDER picks the OCR engine —
   // NOT by a per-receipt record. The first resolver ('anthropic') calls a
-  // low-end Anthropic model; 'deepseek' calls DeepSeek's chat model instead. A
-  // Tavily resolver can be added later by dropping a module in resolvers/ and
-  // setting PRODUCT_RESOLVER=tavily.
+  // low-end Anthropic model; 'deepseek' calls DeepSeek's chat model instead.
+  // PRODUCT_RESOLVER is an ORDERED LIST (e.g. anthropic,deepseek): the first
+  // with a working key names the products, decided per call -- see the bottom
+  // of this file and src/settings/providerOrder.js.
   products: {
     enabled: bool(process.env.PRODUCTS_ENABLED, true),
-    resolver: (process.env.PRODUCT_RESOLVER || 'anthropic').toLowerCase(),
+    // resolver / resolvers: per call -- see the bottom of this file.
     // Resolver modules ship WITH the app (code, not user data), like transformers.
     resolversDir: path.join(__dirname, 'products', 'resolvers'),
     // Durable product results mirror the receipt + profile-result stores: stored
@@ -281,6 +284,12 @@ const config = {
     // behavior change for existing data). It costs nothing extra — the emoji is
     // requested in the SAME backend call that identifies the product.
     emoji: bool(process.env.PRODUCT_EMOJI_ENABLED, true),
+    // Give every line with no category one (src/catalogue/categorize.js): the
+    // category the member's books already give the same product, else the
+    // line's name read by the resolver's model -- one batched call per receipt,
+    // no web search. It is what fills the Products screen's category list for
+    // a synced receipt, which never meets the resolver. Off with =0.
+    categorize: bool(process.env.PRODUCT_CATEGORIZE, true),
     anthropic: {
       // Reuses the same Anthropic credentials/endpoint as the vision OCR path.
       // apiKey: read per call -- see the bottom of this file.
@@ -317,7 +326,9 @@ const config = {
     // 'deepseek' runs DeepSeek's server-side web search and returns the
     // product's name, a page its search returned, a sentence and an emoji --
     // but no picture, because search results carry none.
-    provider: (process.env.ENRICH_PROVIDER || 'tavily').toLowerCase(), // tavily | deepseek
+    // provider / providers: per call, from ENRICH_PROVIDER -- an ORDERED LIST of
+    // tavily | deepseek -- or the order saved in Settings. See the bottom of
+    // this file.
     maxItems: int(process.env.ENRICH_MAX_ITEMS, 40),
     // Lookups run in a bounded pool. Enrichment happens BEFORE a receipt is
     // done, and a DeepSeek search is a model turn, not a search-API hit: one at
@@ -394,20 +405,52 @@ live(config.enrich.tavily, 'apiKey', keyOf('tavily', 'apiKey'));
 live(config.enrich.deepseek, 'apiKey', keyOf('deepseek', 'apiKey'));
 live(config.telegram, 'token', keyOf('telegram', 'botToken'));
 
-// Derived from the keys, so derived per call too. ENRICH_ENABLED set explicitly
-// is the operator's answer and still wins; unset, it follows whether the chosen
-// provider has a key -- which is what "Without it: no line is enriched" on the
-// Tavily card says, and what the DeepSeek card says when DeepSeek enriches.
-live(config.enrich, 'enabled', () => {
-  const lookup = config.enrich.provider === 'deepseek' ? config.enrich.deepseek : config.enrich.tavily;
-  return bool(process.env.ENRICH_ENABLED, !!lookup.apiKey);
-});
+// WHO DOES EACH JOB, per call (src/settings/providerOrder.js). Each of
+// VISION_PROVIDER, ENRICH_PROVIDER and PRODUCT_RESOLVER is an ordered list, and
+// an order saved in Settings wins over it. Two readings per job:
+//
+//   .providers / .resolvers   the list, in order, whatever works
+//   .provider  / .resolver    the one that would do the job NOW: the first with
+//                             a key its provider has not refused -- or, when
+//                             none can, the first in the list, so a log line or
+//                             /health names what was asked for. Call sites that
+//                             must know "nobody can" ask providerOrder.pick().
+//
+// ASSIGNING EITHER PINS THE ORDER for this process, as assigning the one name
+// always did -- `config.vision.provider = 'deepseek'` in a test means "DeepSeek
+// reads", and `= 'anthropic,deepseek'` pins a list.
+const order = () => require('./settings/providerOrder');
+function job(target, one, many, jobId) {
+  Object.defineProperty(target, many, {
+    enumerable: true,
+    configurable: true,
+    get: () => order().order(jobId).order,
+    set: (v) => order().pin(jobId, v),
+  });
+  Object.defineProperty(target, one, {
+    enumerable: true,
+    configurable: true,
+    get: () => {
+      const p = order().pick(jobId);
+      return p.chosen || p.order[0] || null;
+    },
+    set: (v) => order().pin(jobId, v),
+  });
+}
+job(config.vision, 'provider', 'providers', 'vision');
+job(config.enrich, 'provider', 'providers', 'enrich');
+job(config.products, 'resolver', 'resolvers', 'products');
+
+// Derived from the keys and the order, so derived per call too. ENRICH_ENABLED
+// set explicitly is the operator's answer and still wins; unset, it follows
+// whether ANY provider in the list can do the lookup -- which is what "Without
+// it: no line is enriched" on the Tavily card says, and what the DeepSeek card
+// says when DeepSeek enriches.
+live(config.enrich, 'enabled', () => bool(process.env.ENRICH_ENABLED, !!order().pick('enrich').chosen));
 live(config.telegram, 'enabled', () => !!config.telegram.token);
 live(config, 'ocrProvider', () => {
   if (ocrMode !== 'auto') return ocrMode;
-  const readers = { openai: config.vision.openai, deepseek: config.vision.deepseek };
-  const reader = readers[config.vision.provider] || config.vision.anthropic;
-  return reader.apiKey ? 'vision' : 'tesseract';
+  return order().pick('vision').chosen ? 'vision' : 'tesseract';
 });
 
 module.exports = config;
