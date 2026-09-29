@@ -256,7 +256,20 @@ test('the page envelope counts the books, slices the matches, and counts the unp
   assert.equal(env.records.length, 1);
   assert.equal(env.more, true);
   assert.equal(env.receipts, 3, 'the Dairy products came off three receipts');
+  assert.equal(env.categories, 1, 'the categories behind what matched, not the slice');
+  const dairy = all.filter((p) => query.valueOf(p, 'category') === 'Dairy');
+  assert.equal(env.spent, Math.round(dairy.reduce((a, p) => a + p.spent, 0) * 100) / 100,
+    'what matched came to, not what is on the page');
   assert.equal(env.unpictured, all.length);
+});
+
+test('a total with no priced line behind it is null, never 0', () => {
+  const recs = [{ id: 'u', status: 'done', store: { name: 'X' }, items: [{ description: 'MILK', price: null }] }];
+  const all = project.assemble(recs.flatMap((r) => project.purchases(r)));
+  const env = query.page(all, query.parse({}), 'recent', { limit: 24, offset: 0 });
+  assert.equal(env.matched, 1);
+  assert.equal(env.categories, 0);
+  assert.equal(env.spent, null);
 });
 
 test('the Sam’s Club fuel graphic is not a picture of anything', () => {

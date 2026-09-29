@@ -905,8 +905,10 @@ curl -s 'localhost:8080/api/catalogue?category=Dairy&sort=most_spent&limit=24' \
   -H 'X-Tenant-Id: main' -H 'X-User-Id: main' | jq '{total, matched, receipts, first: .records[0].item.description}'
 ```
 
-The envelope is `{ records, total, matched, receipts, limit, offset, more,
-facets, unpictured }`. Each record is
+The envelope is `{ records, total, matched, receipts, categories, spent, limit,
+offset, more, facets, unpictured }`. `receipts`, `categories` and `spent` are over
+what matched, never the slice — the Products screen's meta row — and `spent` is
+`null` when no line behind the matches carried a price. Each record is
 `{ id, key, line, store, item, buys: [{ record: {id, store, retailer}, day, item, qty, spent, lines }], times, qty, spent, last }`
 — the shape the design atlas's `pages/products.js` builders read.
 

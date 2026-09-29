@@ -80,6 +80,8 @@ test('GET /api/catalogue answers the envelope over the books', async () => {
   assert.equal(body.total, 4);
   assert.equal(body.matched, 4);
   assert.equal(body.receipts, 3);
+  assert.equal(body.categories, 2, 'the categories behind what matched');
+  assert.equal(body.spent, 317, 'what matched came to');
   assert.equal(body.more, false);
   assert.equal(body.records[0].line, 'sku:9', 'newest purchase first by default');
   assert.deepEqual(body.facets.options.store, ['Costco', 'Walmart Supercenter']);
@@ -97,6 +99,8 @@ test('filters, the times range, the order and the slice all reach the query', as
 
   r = await get('/api/catalogue?store=Walmart%20Supercenter');
   assert.equal(r.body.matched, 1);
+  assert.equal(r.body.categories, 0, 'the meta row moves with the filter');
+  assert.equal(r.body.spent, 300);
 
   r = await get('/api/catalogue?named=nobody&sort=most_spent');
   assert.deepEqual(r.body.records.map((p) => p.line), ['sku:9', 'sku:2']);

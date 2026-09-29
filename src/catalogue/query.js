@@ -201,14 +201,31 @@ function pictured(item) {
 
 /**
  * The envelope GET /api/catalogue answers: a page, and what it is a page OF.
- * The same numbers the books' envelope carries, counted in products, plus two
- * the Products screen needs: how many receipts the matches came off, and how
- * many products across the books have no picture.
+ * The same numbers the books' envelope carries, counted in products, plus what
+ * the Products screen needs: how many receipts the matches came off, how many
+ * categories they fall in and what they came to -- the meta row the screen
+ * opens on -- and how many products across the books have no picture.
+ *
+ * `categories` and `spent` are over what MATCHED, never the slice, so a filter
+ * moves every figure together. `spent` is null when not one line behind the
+ * matches carried a price: the screen draws a dash, not a $0.00 that would
+ * read as a basket that cost nothing. The atlas's listProducts().
  */
 function page(all, f, sort, { limit, offset }) {
   const matched = sortProducts(all.filter((p) => matches(p, f)), sort);
   const receipts = new Set();
-  for (const p of matched) for (const b of p.buys) receipts.add(b.record.id);
+  const categories = new Set();
+  let spent = 0;
+  let priced = false;
+  for (const p of matched) {
+    for (const b of p.buys) {
+      receipts.add(b.record.id);
+      for (const l of b.lines || []) if (l.price !== null && l.price !== undefined) priced = true;
+    }
+    const c = valueOf(p, 'category');
+    if (c !== null) categories.add(c);
+    spent += p.spent || 0;
+  }
   const from = Math.max(0, offset);
   const records = matched.slice(from, from + limit);
   return {
@@ -216,6 +233,8 @@ function page(all, f, sort, { limit, offset }) {
     total: all.length,
     matched: matched.length,
     receipts: receipts.size,
+    categories: categories.size,
+    spent: priced ? Math.round(spent * 100) / 100 : null,
     limit,
     offset: from,
     more: from + records.length < matched.length,

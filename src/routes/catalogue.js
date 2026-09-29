@@ -48,8 +48,8 @@ function refuse(res, err, next) {
  *                                      name_az | name_za
  *   ?limit= &offset=                   the slice, AFTER the filter and the order
  *
- * Answers { records, total, matched, receipts, limit, offset, more, facets,
- * unpictured } -- the books' envelope, counted in products. See
+ * Answers { records, total, matched, receipts, categories, spent, limit,
+ * offset, more, facets, unpictured } -- the books' envelope, counted in products. See
  * src/catalogue/query.js page().
  */
 router.get('/api/catalogue', async (req, res, next) => {
