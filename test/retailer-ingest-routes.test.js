@@ -145,10 +145,10 @@ test('a retailer id resolves through the registry aliases', async () => {
 // --- Rejections --------------------------------------------------------------
 
 test('an unregistered retailer -> 400, and names what is registered', async () => {
-  const res = await postJson(fixture('scan-and-go.json'), { retailer: 'costco.com' });
+  const res = await postJson(fixture('scan-and-go.json'), { retailer: 'bjs.com' });
   assert.equal(res.status, 400);
   const body = await res.json();
-  assert.match(body.error, /unknown retailer "costco\.com"/);
+  assert.match(body.error, /unknown retailer "bjs\.com"/);
   assert.match(body.error, /samsclub\.com/, 'tells the client what it could have posted');
   assert.equal(queued.length, 0, 'nothing queued');
 });

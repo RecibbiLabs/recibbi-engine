@@ -1,0 +1,61 @@
+{
+  "_comment": "INVENTED values in the real shape Costco's order API returns (the field set ../recibbi-serverside-integration-costco verified live). One receipt per structurally distinct case in docs/costco-receipt-schema.md. No real membership, card, or barcode.",
+  "warehouse": {
+    "warehouseName": "TESTVILLE", "receiptType": "In-Warehouse", "documentType": "WarehouseReceiptDetail",
+    "transactionDateTime": "2026-03-14T12:10:00", "transactionDate": "2026-03-14",
+    "companyNumber": 1, "warehouseNumber": 9999, "operatorNumber": 12, "warehouseShortName": "TESTVILLE",
+    "registerNumber": 7, "transactionNumber": 101, "transactionType": "Sales",
+    "transactionBarcode": "29999007010126031412100", "invoiceNumber": null, "sequenceNumber": null,
+    "warehouseAddress1": "1 EXAMPLE WAY", "warehouseAddress2": null, "warehouseCity": "TESTVILLE",
+    "warehouseState": "WA", "warehouseCountry": "US", "warehousePostalCode": "99999",
+    "totalItemCount": 4, "subTotal": 58.43, "taxes": 1.25, "total": 59.68, "instantSavings": 4.3,
+    "membershipNumber": "000000000001",
+    "itemArray": [
+      { "itemNumber": "1111111", "itemDescription01": "MINI CHEESE", "frenchItemDescription1": null, "itemDescription02": "SL90 T9H8 P504", "frenchItemDescription2": null, "itemIdentifier": null, "itemDepartmentNumber": 17, "transDepartmentNumber": 17, "unit": 1, "amount": 13.79, "taxFlag": "N", "merchantID": null, "entryMethod": null, "itemUnitPriceAmount": 13.79, "fuelUnitQuantity": null, "fuelGradeCode": null, "fuelUomCode": null, "fuelUomDescription": null, "fuelUomDescriptionFr": null, "fuelGradeDescription": null, "fuelGradeDescriptionFr": null },
+      { "itemNumber": "300001", "itemDescription01": "/ CHEESE", "frenchItemDescription1": "/1111111", "itemDescription02": null, "frenchItemDescription2": null, "itemIdentifier": null, "itemDepartmentNumber": 17, "transDepartmentNumber": 17, "unit": -1, "amount": -4.3, "taxFlag": null, "merchantID": null, "entryMethod": null, "itemUnitPriceAmount": 0, "fuelUnitQuantity": null, "fuelGradeCode": null, "fuelUomCode": null, "fuelUomDescription": null, "fuelUomDescriptionFr": null, "fuelGradeDescription": null, "fuelGradeDescriptionFr": null },
+      { "itemNumber": "2222222", "itemDescription01": "BEEF FLANK", "frenchItemDescription1": null, "itemDescription02": null, "frenchItemDescription2": null, "itemIdentifier": null, "itemDepartmentNumber": 18, "transDepartmentNumber": 18, "unit": 1, "amount": 27.77, "taxFlag": "N", "merchantID": null, "entryMethod": null, "itemUnitPriceAmount": 9.99, "fuelUnitQuantity": null, "fuelGradeCode": null, "fuelUomCode": null, "fuelUomDescription": null, "fuelUomDescriptionFr": null, "fuelGradeDescription": null, "fuelGradeDescriptionFr": null },
+      { "itemNumber": "3333333", "itemDescription01": "SPARK WATER", "frenchItemDescription1": null, "itemDescription02": "24/500ML 16.9OZ", "frenchItemDescription2": null, "itemIdentifier": null, "itemDepartmentNumber": 14, "transDepartmentNumber": 14, "unit": 2, "amount": 21.17, "taxFlag": "A", "merchantID": null, "entryMethod": null, "itemUnitPriceAmount": 10.585, "fuelUnitQuantity": null, "fuelGradeCode": null, "fuelUomCode": null, "fuelUomDescription": null, "fuelUomDescriptionFr": null, "fuelGradeDescription": null, "fuelGradeDescriptionFr": null }
+    ],
+    "tenderArray": [
+      { "tenderTypeCode": "CreditDebit", "tenderSubTypeCode": "Visa", "tenderDescription": null, "amountTender": 59.68, "displayAccountNumber": "0000", "sequenceNumber": null, "approvalNumber": null, "responseCode": null, "tenderTypeName": "VI Acct #", "tenderTypeNameFr": null, "transactionID": null, "merchantID": null, "entryMethod": null, "tenderAcctTxnNumber": "000000000000", "tenderAuthorizationCode": "000000", "tenderEntryMethodDescription": "Contactless", "walletType": null, "walletId": null, "storedValueBucket": null }
+    ],
+    "couponArray": [ { "upcnumberCoupon": "300001", "voidflagCoupon": null, "refundflagCoupon": null, "taxflagCoupon": null, "amountCoupon": 4.3 } ],
+    "subTaxes": null
+  },
+  "fuel": {
+    "warehouseName": "Testville", "receiptType": "Gas Station", "documentType": "FuelReceipts",
+    "transactionDateTime": "2026-03-15T08:02:00", "transactionDate": "2026-03-15",
+    "companyNumber": 1, "warehouseNumber": 9999, "operatorNumber": 1, "warehouseShortName": "Testville",
+    "registerNumber": 1, "transactionNumber": 55, "transactionType": "Sales",
+    "transactionBarcode": "29999010005526031508020", "invoiceNumber": 55, "sequenceNumber": 55,
+    "warehouseAddress1": "1 EXAMPLE WAY", "warehouseAddress2": null, "warehouseCity": "TESTVILLE",
+    "warehouseState": "WA", "warehouseCountry": "US", "warehousePostalCode": "99999",
+    "totalItemCount": 1, "subTotal": 26, "taxes": 0, "total": 26, "instantSavings": 0,
+    "membershipNumber": "000000000001",
+    "itemArray": [
+      { "itemNumber": "800599", "itemDescription01": "REGULAR UNLEADED", "frenchItemDescription1": null, "itemDescription02": null, "frenchItemDescription2": null, "itemIdentifier": null, "itemDepartmentNumber": 53, "transDepartmentNumber": 53, "unit": 1, "amount": 26, "taxFlag": null, "merchantID": null, "entryMethod": null, "itemUnitPriceAmount": 2.899, "fuelUnitQuantity": 8.969, "fuelGradeCode": "1", "fuelUomCode": "GAL", "fuelUomDescription": null, "fuelUomDescriptionFr": null, "fuelGradeDescription": "Regular", "fuelGradeDescriptionFr": null }
+    ],
+    "tenderArray": [
+      { "tenderTypeCode": "CreditDebit", "tenderSubTypeCode": "VisaCoBranded", "tenderDescription": null, "amountTender": 26, "displayAccountNumber": "0000", "sequenceNumber": null, "approvalNumber": null, "responseCode": null, "tenderTypeName": "VI Acct #", "tenderTypeNameFr": null, "transactionID": null, "merchantID": null, "entryMethod": null, "tenderAcctTxnNumber": "000000000000", "tenderAuthorizationCode": "000000", "tenderEntryMethodDescription": "Contactless", "walletType": null, "walletId": null, "storedValueBucket": null }
+    ],
+    "couponArray": null,
+    "subTaxes": null
+  },
+  "refund": {
+    "warehouseName": "TESTVILLE", "receiptType": "In-Warehouse", "documentType": "WarehouseReceiptDetail",
+    "transactionDateTime": "2026-04-02T16:40:00", "transactionDate": "2026-04-02",
+    "companyNumber": 1, "warehouseNumber": 9999, "operatorNumber": 30, "warehouseShortName": "TESTVILLE",
+    "registerNumber": 3, "transactionNumber": 9, "transactionType": "Refund",
+    "transactionBarcode": "29999003000926040216400", "invoiceNumber": null, "sequenceNumber": null,
+    "warehouseAddress1": "1 EXAMPLE WAY", "warehouseAddress2": null, "warehouseCity": "TESTVILLE",
+    "warehouseState": "WA", "warehouseCountry": "US", "warehousePostalCode": "99999",
+    "totalItemCount": -1, "subTotal": -299.99, "taxes": -19.5, "total": -319.49, "instantSavings": 0,
+    "membershipNumber": "000000000001",
+    "itemArray": [
+      { "itemNumber": "4444444", "itemDescription01": "STICK VACUUM", "frenchItemDescription1": null, "itemDescription02": null, "frenchItemDescription2": null, "itemIdentifier": null, "itemDepartmentNumber": 23, "transDepartmentNumber": 23, "unit": -1, "amount": -299.99, "taxFlag": "Y", "merchantID": null, "entryMethod": null, "itemUnitPriceAmount": 299.99, "fuelUnitQuantity": null, "fuelGradeCode": null, "fuelUomCode": null, "fuelUomDescription": null, "fuelUomDescriptionFr": null, "fuelGradeDescription": null, "fuelGradeDescriptionFr": null }
+    ],
+    "tenderArray": [],
+    "couponArray": null,
+    "subTaxes": null
+  }
+}

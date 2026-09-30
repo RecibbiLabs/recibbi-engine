@@ -184,6 +184,6 @@ test('a record with no enrich option still enriches — receipts written before 
 test('an unknown retailer on the record fails the job with a clear reason', async () => {
   restoreFetch = noNetwork();
   const created = await ingest('scan-and-go.json');
-  await store.update(created.id, { retailer: 'costco.com' });
-  await assert.rejects(() => processReceipt(created.id), /adapter "costco.com" is not available/);
+  await store.update(created.id, { retailer: 'bjs.com' });
+  await assert.rejects(() => processReceipt(created.id), /adapter "bjs.com" is not available/);
 });
