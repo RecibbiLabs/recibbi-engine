@@ -292,6 +292,7 @@ Responses are the photo endpoint's body plus retailer context:
 |---|---|
 | `test/retailers-registry.test.js` | adapter discovery, alias resolution, unknown ids |
 | `test/retailers-samsclub.test.js` | the adapter against 10 real scrubbed payloads — one test per documented trap |
+| `test/retailers-costco.test.js` | the Costco adapter against invented receipts in the real API shape — one test per trap in `costco-receipt-schema.md` |
 | `test/retailer-ingest-routes.test.js` | the HTTP surface over a real loopback Express app: both encodings, every rejection, flow selection, identity scoping, dedupe, payload read-back, views |
 | `test/retailer-pipeline.test.js` | the real pipeline end to end, with a `fetch` that throws — which is itself the proof that no OCR backend and no Tavily were reached |
 | `test/live/samsclub-corpus.live.test.js` | *optional*: the whole 248-payload corpus, re-deriving the schema doc's counts. Self-skips when the corpus is absent |
@@ -313,4 +314,7 @@ survived. See [`test/fixtures/retailers/samsclub/README.md`](../test/fixtures/re
 - **Re-normalize endpoint.** The payload is kept precisely so a receipt can be
   re-normalized after an adapter improves; nothing exposes that yet beyond
   re-running the job.
-- **`costco.com`.** The registry is ready; the payload is not documented.
+- ~~**`costco.com`.**~~ Built: `src/retailers/adapters/costco.com.js`, payload and
+  traps in [`costco-receipt-schema.md`](costco-receipt-schema.md). One API receipt
+  per POST, `/api/retailer:costco/receipts`; instant-savings lines are folded into
+  the item they discount.

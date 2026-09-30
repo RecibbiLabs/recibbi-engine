@@ -33,10 +33,10 @@ test('a retailer id resolves case- and punctuation-insensitively', () => {
 });
 
 test('an unregistered retailer resolves to null, not a throw', () => {
-  assert.equal(registry.get('costco.com'), null);
+  assert.equal(registry.get('bjs.com'), null);
   assert.equal(registry.get(''), null);
   assert.equal(registry.get(undefined), null);
-  assert.equal(registry.has('costco.com'), false);
+  assert.equal(registry.has('bjs.com'), false);
   assert.equal(registry.has('samsclub'), true);
 });
 
